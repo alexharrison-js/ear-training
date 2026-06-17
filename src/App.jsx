@@ -4,13 +4,46 @@ import React, { useState, useRef, useCallback, useEffect } from "react";
    THEORY ENGINE
    --------------------------------------------------------------- */
 
-const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const NOTE_NAMES = [
+  "C",
+  "C#",
+  "D",
+  "D#",
+  "E",
+  "F",
+  "F#",
+  "G",
+  "G#",
+  "A",
+  "A#",
+  "B",
+];
 
 // Scale-degree -> semitone offset from root, including alterations.
 const DEGREE_SEMITONES = {
-  1: 0, b2: 1, 2: 2, "#2": 3, b3: 3, 3: 4, 4: 5, "#4": 6, b5: 6, 5: 7,
-  "#5": 8, b6: 8, 6: 9, bb7: 9, b7: 10, 7: 11,
-  b9: 13, 9: 14, "#9": 15, 11: 17, "#11": 18, b13: 20, 13: 21,
+  1: 0,
+  b2: 1,
+  2: 2,
+  "#2": 3,
+  b3: 3,
+  3: 4,
+  4: 5,
+  "#4": 6,
+  b5: 6,
+  5: 7,
+  "#5": 8,
+  b6: 8,
+  6: 9,
+  bb7: 9,
+  b7: 10,
+  7: 11,
+  b9: 13,
+  9: 14,
+  "#9": 15,
+  11: 17,
+  "#11": 18,
+  b13: 20,
+  13: 21,
 };
 
 // Chord formulas as the degrees present (already designed to come out
@@ -39,7 +72,11 @@ const CHORD_TYPES = [
   { id: "maj13", label: "maj13", degrees: [1, 3, 5, 7, 9, 13] },
   { id: "min13", label: "min13", degrees: [1, "b3", 5, "b7", 9, 13] },
   { id: "dom13", label: "13", degrees: [1, 3, 5, "b7", 9, 13] },
-  { id: "dom13sharp11", label: "13#11", degrees: [1, 3, 5, "b7", 9, "#11", 13] },
+  {
+    id: "dom13sharp11",
+    label: "13#11",
+    degrees: [1, 3, 5, "b7", 9, "#11", 13],
+  },
   { id: "altDom", label: "7alt", degrees: [1, 3, "b5", "b7", "b9", "#9"] },
   { id: "sus4", label: "sus4", degrees: [1, 4, 5] },
   { id: "sus2", label: "sus2", degrees: [1, 2, 5] },
@@ -83,15 +120,22 @@ function freqFromMidi(midi) {
 const VOICING_STYLES = ["close", "inverted", "spread", "drop2"];
 
 function buildVoicedChord(degrees, rootMidi, style, rng) {
-  const base = degrees.map((d, i) => ({ midi: midiFromRootAndDegree(rootMidi, d), i }));
+  const base = degrees.map((d, i) => ({
+    midi: midiFromRootAndDegree(rootMidi, d),
+    i,
+  }));
   let tagged = base.map((t) => ({ ...t }));
   const n = tagged.length;
 
   if (style === "inverted" && n > 1) {
     const inversion = 1 + Math.floor(rng() * (n - 1)); // how many low tones flip up an octave
-    tagged = tagged.map((t, idx) => (idx < inversion ? { ...t, midi: t.midi + 12 } : t));
+    tagged = tagged.map((t, idx) =>
+      idx < inversion ? { ...t, midi: t.midi + 12 } : t,
+    );
   } else if (style === "spread" && n > 2) {
-    tagged = tagged.map((t, idx) => (idx % 2 === 1 ? { ...t, midi: t.midi + 12 } : t));
+    tagged = tagged.map((t, idx) =>
+      idx % 2 === 1 ? { ...t, midi: t.midi + 12 } : t,
+    );
   } else if (style === "drop2" && n > 2) {
     const idx = n - 2;
     tagged[idx] = { ...tagged[idx], midi: tagged[idx].midi - 12 };
@@ -108,6 +152,7 @@ function buildVoicedChord(degrees, rootMidi, style, rng) {
 
 function useAudioEngine() {
   const ctxRef = useRef(null);
+  const sustainedNodesRef = useRef([]);
 
   const getCtx = useCallback(() => {
     if (!ctxRef.current) {
@@ -121,61 +166,112 @@ function useAudioEngine() {
 
   // Warm, slightly electric-piano-ish tone: a few detuned sine/triangle
   // partials with a soft envelope. Easy on the ear for long sessions.
-  const playNote = useCallback((midi, { duration = 1.4, delay = 0, gain = 0.22, pan = 0 } = {}) => {
-    const ctx = getCtx();
-    const startAt = ctx.currentTime + delay;
-    const freq = freqFromMidi(midi);
+  const playNote = useCallback(
+    (midi, { duration = 1.4, delay = 0, gain = 0.22, pan = 0 } = {}) => {
+      const ctx = getCtx();
+      const startAt = ctx.currentTime + delay;
+      const freq = freqFromMidi(midi);
 
-    const master = ctx.createGain();
-    master.gain.value = 0;
-    const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-    if (panner) {
-      panner.pan.value = pan;
-      master.connect(panner);
-      panner.connect(ctx.destination);
-    } else {
-      master.connect(ctx.destination);
-    }
+      const master = ctx.createGain();
+      master.gain.value = 0;
+      const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+      if (panner) {
+        panner.pan.value = pan;
+        master.connect(panner);
+        panner.connect(ctx.destination);
+      } else {
+        master.connect(ctx.destination);
+      }
 
-    const partials = [
-      { ratio: 1, type: "sine", level: 1.0 },
-      { ratio: 1, type: "triangle", level: 0.35, detune: 4 },
-      { ratio: 2, type: "sine", level: 0.12 },
-      { ratio: 3, type: "sine", level: 0.05 },
-    ];
+      const partials = [
+        { ratio: 1, type: "sine", level: 1.0 },
+        { ratio: 1, type: "triangle", level: 0.35, detune: 4 },
+        { ratio: 2, type: "sine", level: 0.12 },
+        { ratio: 3, type: "sine", level: 0.05 },
+      ];
 
-    partials.forEach((p) => {
-      const osc = ctx.createOscillator();
-      osc.type = p.type;
-      osc.frequency.value = freq * p.ratio;
-      if (p.detune) osc.detune.value = p.detune;
-      const g = ctx.createGain();
-      g.gain.value = p.level;
-      osc.connect(g);
-      g.connect(master);
-      osc.start(startAt);
-      osc.stop(startAt + duration + 0.1);
+      partials.forEach((p) => {
+        const osc = ctx.createOscillator();
+        osc.type = p.type;
+        osc.frequency.value = freq * p.ratio;
+        if (p.detune) osc.detune.value = p.detune;
+        const g = ctx.createGain();
+        g.gain.value = p.level;
+        osc.connect(g);
+        g.connect(master);
+        osc.start(startAt);
+        osc.stop(startAt + duration + 0.1);
+      });
+
+      const peak = gain;
+      master.gain.setValueAtTime(0, startAt);
+      master.gain.linearRampToValueAtTime(peak, startAt + 0.015);
+      master.gain.exponentialRampToValueAtTime(peak * 0.55, startAt + 0.25);
+      master.gain.setValueAtTime(
+        peak * 0.55,
+        startAt + Math.max(0.25, duration - 0.35),
+      );
+      master.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+
+      return startAt + duration;
+    },
+    [getCtx],
+  );
+
+  const playChord = useCallback(
+    (midiNotes, { stagger = 0, ...opts } = {}) => {
+      let t = 0;
+      midiNotes.forEach((midi) => {
+        playNote(midi, { ...opts, delay: t });
+        t += stagger;
+      });
+    },
+    [playNote],
+  );
+
+  const stopSustainedChord = useCallback(() => {
+    sustainedNodesRef.current.forEach((osc) => {
+      try {
+        osc.stop();
+      } catch {}
     });
 
-    const peak = gain;
-    master.gain.setValueAtTime(0, startAt);
-    master.gain.linearRampToValueAtTime(peak, startAt + 0.015);
-    master.gain.exponentialRampToValueAtTime(peak * 0.55, startAt + 0.25);
-    master.gain.setValueAtTime(peak * 0.55, startAt + Math.max(0.25, duration - 0.35));
-    master.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+    sustainedNodesRef.current = [];
+  }, []);
 
-    return startAt + duration;
-  }, [getCtx]);
+  const playSustainedChord = useCallback(
+    (notes) => {
+      stopSustainedChord();
 
-  const playChord = useCallback((midiNotes, { stagger = 0, ...opts } = {}) => {
-    let t = 0;
-    midiNotes.forEach((midi) => {
-      playNote(midi, { ...opts, delay: t });
-      t += stagger;
-    });
-  }, [playNote]);
+      const ctx = getCtx();
 
-  return { playNote, playChord, getCtx };
+      notes.forEach((midi) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = "triangle";
+        osc.frequency.value = freqFromMidi(midi);
+
+        gain.gain.value = 0.04;
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start();
+
+        sustainedNodesRef.current.push(osc);
+      });
+    },
+    [getCtx, stopSustainedChord],
+  );
+
+  return {
+    playNote,
+    playChord,
+    playSustainedChord,
+    stopSustainedChord,
+    getCtx,
+  };
 }
 
 /* ---------------------------------------------------------------
@@ -197,7 +293,9 @@ function Knob({ label, value, onChange, options }) {
         style={{ minWidth: 0 }}
       >
         {options.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
         ))}
       </select>
     </div>
@@ -209,7 +307,8 @@ function Knob({ label, value, onChange, options }) {
    --------------------------------------------------------------- */
 
 export default function EarTrainer() {
-  const { playChord, playNote } = useAudioEngine();
+  const { playChord, playNote, playSustainedChord, stopSustainedChord } =
+    useAudioEngine();
 
   const [rootName, setRootName] = useState("random");
   const [octave, setOctave] = useState(3);
@@ -219,13 +318,98 @@ export default function EarTrainer() {
   const [revealed, setRevealed] = useState(false);
   const [round, setRound] = useState(null);
   const [streak, setStreak] = useState(0);
+  const [practiceView, setPracticeView] = useState(false);
+  const [practiceMode, setPracticeMode] = useState("chordTypes");
+  const [sustainMode, setSustainMode] = useState(false);
+  const [missedItems, setMissedItems] = useState(() => {
+    try {
+      const saved = localStorage.getItem("eartrainer-missed");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const chordType = CHORD_TYPES.find((c) => c.id === chordTypeId);
 
+  const missedChordTypes = [...new Set(missedItems.map((x) => x.chordTypeId))];
+
+  const missedDegrees = [...new Set(missedItems.map((x) => x.targetDegree))];
+
+  const missedVoicings = [
+    ...new Set(missedItems.map((x) => x.voicingStyleUsed)),
+  ];
+
   const newRound = useCallback(() => {
-    const degrees = chordType.degrees;
-    const targetIdx = Math.floor(Math.random() * degrees.length);
-    const targetDegree = degrees[targetIdx];
+    stopSustainedChord();
+    let selectedChordType = chordType;
+    let selectedTargetDegree = null;
+
+    if (practiceView && missedItems.length > 0) {
+      if (practiceMode === "chordTypes" && missedChordTypes.length > 0) {
+        const selectedId =
+          missedChordTypes[Math.floor(Math.random() * missedChordTypes.length)];
+
+        selectedChordType =
+          CHORD_TYPES.find((c) => c.id === selectedId) ?? chordType;
+      }
+
+      if (practiceMode === "specific" && missedItems.length > 0) {
+        const selectedMiss =
+          missedItems[Math.floor(Math.random() * missedItems.length)];
+
+        selectedChordType =
+          CHORD_TYPES.find((c) => c.id === selectedMiss.chordTypeId) ??
+          chordType;
+
+        selectedTargetDegree = selectedMiss.targetDegree;
+      }
+    }
+
+    let targetDegree = null;
+    let targetIdx = null;
+
+    if (practiceView && practiceMode === "tones" && missedDegrees.length > 0) {
+      const eligibleChords = CHORD_TYPES.filter((chord) =>
+        chord.degrees.some((d) => missedDegrees.includes(d)),
+      );
+
+      if (eligibleChords.length > 0) {
+        selectedChordType =
+          eligibleChords[Math.floor(Math.random() * eligibleChords.length)];
+
+        const matchingDegrees = selectedChordType.degrees.filter((d) =>
+          missedDegrees.includes(d),
+        );
+
+        targetDegree =
+          matchingDegrees[Math.floor(Math.random() * matchingDegrees.length)];
+      }
+    }
+
+    const degrees = selectedChordType.degrees;
+    if (targetDegree === null || targetDegree === undefined) {
+      if (practiceView && practiceMode === "specific" && selectedTargetDegree) {
+        targetDegree = selectedTargetDegree;
+        targetIdx = degrees.indexOf(targetDegree);
+
+        if (targetIdx < 0) {
+          targetIdx = Math.floor(Math.random() * degrees.length);
+          targetDegree = degrees[targetIdx];
+        }
+      } else {
+        targetIdx = Math.floor(Math.random() * degrees.length);
+        targetDegree = degrees[targetIdx];
+      }
+    }
+    if (targetIdx === null || targetIdx === undefined) {
+      targetIdx = degrees.indexOf(targetDegree);
+
+      if (targetIdx < 0) {
+        targetIdx = Math.floor(Math.random() * degrees.length);
+        targetDegree = degrees[targetIdx];
+      }
+    }
 
     const actualRootName =
       rootName === "random"
@@ -233,17 +417,33 @@ export default function EarTrainer() {
         : rootName;
     const rootMidi = NOTE_NAMES.indexOf(actualRootName) + (octave + 1) * 12;
 
-    const actualStyle =
-      voicingStyle === "random"
-        ? VOICING_STYLES[Math.floor(Math.random() * VOICING_STYLES.length)]
-        : voicingStyle;
+    let actualStyle;
 
-    const tagged = buildVoicedChord(degrees, rootMidi, actualStyle, Math.random);
+    if (
+      practiceView &&
+      practiceMode === "voicings" &&
+      missedVoicings.length > 0
+    ) {
+      actualStyle =
+        missedVoicings[Math.floor(Math.random() * missedVoicings.length)];
+    } else {
+      actualStyle =
+        voicingStyle === "random"
+          ? VOICING_STYLES[Math.floor(Math.random() * VOICING_STYLES.length)]
+          : voicingStyle;
+    }
+
+    const tagged = buildVoicedChord(
+      degrees,
+      rootMidi,
+      actualStyle,
+      Math.random,
+    );
     const voicing = tagged.map((t) => t.midi);
     const targetMidi = tagged.find((t) => t.i === targetIdx).midi;
 
     setRound({
-      chordType,
+      chordType: selectedChordType,
       rootMidi,
       rootName: actualRootName,
       voicingStyleUsed: actualStyle,
@@ -254,19 +454,49 @@ export default function EarTrainer() {
       targetMidi,
     });
     setRevealed(false);
-  }, [chordType, rootName, octave, voicingStyle]);
+  }, [
+    chordType,
+    rootName,
+    octave,
+    voicingStyle,
+    practiceView,
+    practiceMode,
+    missedItems,
+    missedChordTypes,
+    missedDegrees,
+    missedVoicings,
+    stopSustainedChord,
+  ]);
 
   useEffect(() => {
     newRound();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chordTypeId, rootName, octave, voicingStyle]);
+  }, [chordTypeId, rootName, octave, voicingStyle, practiceView, practiceMode]);
+
+  useEffect(() => {
+    localStorage.setItem("eartrainer-missed", JSON.stringify(missedItems));
+  }, [missedItems]);
 
   const handlePlayChord = () => {
     if (!round) return;
+
+    if (sustainMode) {
+      playSustainedChord(round.voicing);
+      return;
+    }
+
     if (mode === "block") {
-      playChord(round.voicing, { stagger: 0, duration: 2.2, gain: 0.16 });
+      playChord(round.voicing, {
+        stagger: 0,
+        duration: 2.2,
+        gain: 0.16,
+      });
     } else {
-      playChord(round.voicing, { stagger: 0.34, duration: 1.1, gain: 0.22 });
+      playChord(round.voicing, {
+        stagger: 0.34,
+        duration: 1.1,
+        gain: 0.22,
+      });
     }
   };
 
@@ -278,7 +508,23 @@ export default function EarTrainer() {
 
   const handleNext = (wasCorrectSelfReport) => {
     if (wasCorrectSelfReport === true) setStreak((s) => s + 1);
-    if (wasCorrectSelfReport === false) setStreak(0);
+    if (wasCorrectSelfReport === false) {
+      setMissedItems((prev) => [
+        ...prev,
+        {
+          timestamp: Date.now(),
+          rootName: round.rootName,
+          chordTypeId: round.chordType.id,
+          chordTypeLabel: round.chordType.label,
+          targetDegree: round.targetDegree,
+          voicingStyleUsed: round.voicingStyleUsed,
+          targetMidi: round.targetMidi,
+          degrees: round.degrees,
+        },
+      ]);
+
+      setStreak(0);
+    }
     newRound();
   };
 
@@ -299,7 +545,6 @@ export default function EarTrainer() {
       style={{ fontFamily: "'Iowan Old Style', Georgia, serif" }}
     >
       <div className="w-full max-w-md">
-
         <div className="mb-7 text-center">
           <div className="text-[11px] uppercase tracking-[0.3em] text-amber-400/60 mb-1.5">
             By Ear
@@ -317,11 +562,60 @@ export default function EarTrainer() {
             <div
               key={i}
               className={`h-1 w-5 rounded-full transition-colors duration-300 ${
-                i < streak % 8 && streak > 0 ? "bg-amber-400" : "bg-amber-900/40"
+                i < streak % 8 && streak > 0
+                  ? "bg-amber-400"
+                  : "bg-amber-900/40"
               }`}
             />
           ))}
-          <span className="text-xs text-amber-300/50 ml-2 tabular-nums">{streak}</span>
+          <span className="text-xs text-amber-300/50 ml-2 tabular-nums">
+            {streak}
+          </span>
+        </div>
+        <button
+          onClick={() => setMissedItems([])}
+          className="px-3 py-2 rounded-lg border border-amber-700/40 text-sm"
+        >
+          Clear Missed
+        </button>
+        {practiceView && (
+          <div className="mb-4">
+            <Knob
+              label="Practice"
+              value={practiceMode}
+              onChange={setPracticeMode}
+              options={[
+                {
+                  value: "chordTypes",
+                  label: "Chord Types",
+                },
+                {
+                  value: "tones",
+                  label: "Chord Tones",
+                },
+                {
+                  value: "voicings",
+                  label: "Voicings",
+                },
+                {
+                  value: "specific",
+                  label: "Specific Misses",
+                },
+              ]}
+            />
+          </div>
+        )}
+        <div className="flex items-center justify-center gap-3 mb-6">
+          <button
+            onClick={() => setPracticeView((v) => !v)}
+            className="px-3 py-2 rounded-lg border border-amber-700/40 text-sm"
+          >
+            {practiceView ? "Back To Training" : "Practice Missed"}
+          </button>
+
+          <span className="text-xs text-amber-300/50">
+            Missed: {missedItems.length}
+          </span>
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-3">
@@ -365,6 +659,22 @@ export default function EarTrainer() {
             ]}
           />
         </div>
+        <div className="mb-5">
+          <label className="flex items-center gap-2 text-sm text-amber-200">
+            <input
+              type="checkbox"
+              checked={sustainMode}
+              onChange={(e) => {
+                if (!e.target.checked) {
+                  stopSustainedChord();
+                }
+
+                setSustainMode(e.target.checked);
+              }}
+            />
+            Sustained Chord
+          </label>
+        </div>
 
         <div className="mb-2">
           <Knob
@@ -379,13 +689,13 @@ export default function EarTrainer() {
         </div>
 
         <div className="relative rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-6 sm:p-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-
           <div className="text-center mb-6">
             <div className="text-[10px] uppercase tracking-[0.25em] text-amber-400/50 mb-1">
               Now sounding
             </div>
             <div className="text-3xl font-semibold text-amber-50">
-              {round ? round.rootName : rootName}{chordType.label}
+              {round ? round.rootName : rootName}
+              {round ? round.chordType.label : chordType.label}
             </div>
             {round && (
               <div className="text-[11px] text-amber-200/30 mt-1 capitalize">
@@ -437,7 +747,9 @@ export default function EarTrainer() {
                 </span>
                 <span className="text-2xl font-semibold text-amber-300">
                   {targetNoteName.name}
-                  <span className="text-amber-200/40 text-base ml-0.5">{targetNoteName.octave}</span>
+                  <span className="text-amber-200/40 text-base ml-0.5">
+                    {targetNoteName.octave}
+                  </span>
                 </span>
               </div>
 
@@ -472,7 +784,8 @@ export default function EarTrainer() {
 
         <p className="text-center text-[11px] text-amber-200/25 mt-6 leading-relaxed">
           Degrees are counted against the chord's own formula — the requested
-          tone is always a real chord member, including altered 9ths, 11ths and 13ths.
+          tone is always a real chord member, including altered 9ths, 11ths and
+          13ths.
         </p>
       </div>
 
