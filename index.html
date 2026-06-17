@@ -1,36 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Chord Tone Trainer</title>
-
-<!-- iOS "Add to Home Screen" behavior: launches full-screen, no Safari chrome -->
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="Chord Trainer" />
-<meta name="theme-color" content="#120d0a" />
-
-<!-- Home screen icon: a simple generated glyph, no external file needed -->
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Crect width='120' height='120' rx='24' fill='%23120d0a'/%3E%3Ctext x='60' y='78' font-size='58' text-anchor='middle' fill='%23f59e0b' font-family='Georgia, serif' font-weight='bold'%3E%E2%99%AA%3C/text%3E%3C/svg%3E" />
-
-<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
-<script src="https://cdn.tailwindcss.com"></script>
-
-<style>
-  html, body, #root { height: 100%; margin: 0; background:#120d0a; }
-  /* Respect iPhone notch / home indicator safe areas when run full-screen */
-  body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
-  select { background-image: none; }
-</style>
-</head>
-<body>
-<div id="root"></div>
-
-<script type="text/babel" data-presets="react">
-const { useState, useRef, useCallback, useEffect } = React;
+import React, { useState, useRef, useCallback, useEffect } from "react";
 
 /* ---------------------------------------------------------------
    THEORY ENGINE
@@ -38,13 +6,22 @@ const { useState, useRef, useCallback, useEffect } = React;
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
-const DEGREE_SEMITONES = {
+// Scale-degree -> semitone offset from root, including alterations.
+const DEGREE_SEMITONES: Record<string | number, number> = {
   1: 0, b2: 1, 2: 2, "#2": 3, b3: 3, 3: 4, 4: 5, "#4": 6, b5: 6, 5: 7,
   "#5": 8, b6: 8, 6: 9, bb7: 9, b7: 10, 7: 11,
   b9: 13, 9: 14, "#9": 15, 11: 17, "#11": 18, b13: 20, 13: 21,
 };
 
-const CHORD_TYPES = [
+interface ChordType {
+  id: string;
+  label: string;
+  degrees: (string | number)[];
+}
+
+// Chord formulas as the degrees present (already designed to come out
+// monotonically ascending in semitone order above the root).
+const CHORD_TYPES: ChordType[] = [
   { id: "maj", label: "maj", degrees: [1, 3, 5] },
   { id: "min", label: "min", degrees: [1, "b3", 5] },
   { id: "dim", label: "dim", degrees: [1, "b3", "b5"] },
@@ -78,38 +55,66 @@ const CHORD_TYPES = [
   { id: "min6", label: "min6", degrees: [1, "b3", 5, 6] },
 ];
 
-function degreeLabel(d) { return String(d); }
-
-function midiFromRootAndDegree(rootMidi, degree) {
-  return rootMidi + DEGREE_SEMITONES[degree];
+function degreeLabel(d: string | number): string {
+  return String(d);
 }
 
-function noteNameFromMidi(midi) {
+function midiFromRootAndDegree(rootMidi: number, degree: string | number): number {
+  const semis = DEGREE_SEMITONES[degree];
+  return rootMidi + semis;
+}
+
+function noteNameFromMidi(midi: number) {
   const name = NOTE_NAMES[((midi % 12) + 12) % 12];
   const octave = Math.floor(midi / 12) - 1;
   return { name, octave, full: `${name}${octave}` };
 }
 
-function freqFromMidi(midi) {
+function freqFromMidi(midi: number): number {
   return 440 * Math.pow(2, (midi - 69) / 12);
 }
 
 /* ---------------------------------------------------------------
    VOICING ENGINE
+   Randomizes how the chord tones are distributed across octaves —
+   close (root position, tight stack), inverted (a non-root tone
+   becomes the lowest voice), spread (alternating tones lifted an
+   octave for an open sound), and drop2 (the second-from-top voice
+   dropped an octave, a classic jazz piano voicing). The target
+   tone's identity is tracked by its original formula index, so the
+   "answer" always reflects whatever octave it actually sounds at
+   in that particular voicing.
    --------------------------------------------------------------- */
 
 const VOICING_STYLES = ["close", "inverted", "spread", "drop2"];
 
-function buildVoicedChord(degrees, rootMidi, style, rng) {
-  const base = degrees.map((d, i) => ({ midi: midiFromRootAndDegree(rootMidi, d), i }));
-  let tagged = base.map((t) => ({ ...t }));
+interface TaggedNote {
+  midi: number;
+  i: number;
+}
+
+function buildVoicedChord(
+  degrees: (string | number)[],
+  rootMidi: number,
+  style: string,
+  rng: () => number
+): TaggedNote[] {
+  const base = degrees.map((d, i) => ({
+    midi: midiFromRootAndDegree(rootMidi, d),
+    i,
+  }));
+  let tagged: TaggedNote[] = base.map((t) => ({ ...t }));
   const n = tagged.length;
 
   if (style === "inverted" && n > 1) {
     const inversion = 1 + Math.floor(rng() * (n - 1));
-    tagged = tagged.map((t, idx) => (idx < inversion ? { ...t, midi: t.midi + 12 } : t));
+    tagged = tagged.map((t, idx) =>
+      idx < inversion ? { ...t, midi: t.midi + 12 } : t
+    );
   } else if (style === "spread" && n > 2) {
-    tagged = tagged.map((t, idx) => (idx % 2 === 1 ? { ...t, midi: t.midi + 12 } : t));
+    tagged = tagged.map((t, idx) =>
+      idx % 2 === 1 ? { ...t, midi: t.midi + 12 } : t
+    );
   } else if (style === "drop2" && n > 2) {
     const idx = n - 2;
     tagged[idx] = { ...tagged[idx], midi: tagged[idx].midi - 12 };
@@ -123,12 +128,19 @@ function buildVoicedChord(degrees, rootMidi, style, rng) {
    AUDIO ENGINE
    --------------------------------------------------------------- */
 
-function useAudioEngine() {
-  const ctxRef = useRef(null);
+interface SustainOscillator {
+  osc: Oscillator;
+  gain: GainNode;
+}
 
-  const getCtx = useCallback(() => {
+function useAudioEngine() {
+  const ctxRef = useRef<AudioContext | null>(null);
+  const sustainOscillatorsRef = useRef<SustainOscillator[]>([]);
+
+  const getCtx = useCallback((): AudioContext => {
     if (!ctxRef.current) {
-      ctxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      ctxRef.current = new (window.AudioContext ||
+        (window as any).webkitAudioContext)();
     }
     if (ctxRef.current.state === "suspended") {
       ctxRef.current.resume();
@@ -136,68 +148,157 @@ function useAudioEngine() {
     return ctxRef.current;
   }, []);
 
-  const playNote = useCallback((midi, { duration = 1.4, delay = 0, gain = 0.22, pan = 0 } = {}) => {
+  interface PlayNoteOptions {
+    duration?: number;
+    delay?: number;
+    gain?: number;
+    pan?: number;
+  }
+
+  const playNote = useCallback(
+    (
+      midi: number,
+      { duration = 1.4, delay = 0, gain = 0.22, pan = 0 } = {} as PlayNoteOptions
+    ) => {
+      const ctx = getCtx();
+      const startAt = ctx.currentTime + delay;
+      const freq = freqFromMidi(midi);
+
+      const master = ctx.createGain();
+      master.gain.value = 0;
+      const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+      if (panner) {
+        panner.pan.value = pan;
+        master.connect(panner);
+        panner.connect(ctx.destination);
+      } else {
+        master.connect(ctx.destination);
+      }
+
+      interface Partial {
+        ratio: number;
+        type: OscillatorType;
+        level: number;
+        detune?: number;
+      }
+
+      const partials: Partial[] = [
+        { ratio: 1, type: "sine", level: 1.0 },
+        { ratio: 1, type: "triangle", level: 0.35, detune: 4 },
+        { ratio: 2, type: "sine", level: 0.12 },
+        { ratio: 3, type: "sine", level: 0.05 },
+      ];
+
+      partials.forEach((p) => {
+        const osc = ctx.createOscillator();
+        osc.type = p.type;
+        osc.frequency.value = freq * p.ratio;
+        if (p.detune) osc.detune.value = p.detune;
+        const g = ctx.createGain();
+        g.gain.value = p.level;
+        osc.connect(g);
+        g.connect(master);
+        osc.start(startAt);
+        osc.stop(startAt + duration + 0.1);
+      });
+
+      const peak = gain;
+      master.gain.setValueAtTime(0, startAt);
+      master.gain.linearRampToValueAtTime(peak, startAt + 0.015);
+      master.gain.exponentialRampToValueAtTime(peak * 0.55, startAt + 0.25);
+      master.gain.setValueAtTime(
+        peak * 0.55,
+        startAt + Math.max(0.25, duration - 0.35)
+      );
+      master.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+
+      return startAt + duration;
+    },
+    [getCtx]
+  );
+
+  const playChord = useCallback(
+    (midiNotes: number[], { stagger = 0, ...opts } = {} as any) => {
+      let t = 0;
+      midiNotes.forEach((midi) => {
+        playNote(midi, { ...opts, delay: t });
+        t += stagger;
+      });
+    },
+    [playNote]
+  );
+
+  const sustainChord = useCallback(
+    (midiNotes: number[], { gain = 0.16 } = {} as any) => {
+      const ctx = getCtx();
+      stopSustain();
+
+      midiNotes.forEach((midi) => {
+        const freq = freqFromMidi(midi);
+        const master = ctx.createGain();
+        master.gain.value = 0;
+
+        interface Partial {
+          ratio: number;
+          type: OscillatorType;
+          level: number;
+          detune?: number;
+        }
+
+        const partials: Partial[] = [
+          { ratio: 1, type: "sine", level: 1.0 },
+          { ratio: 1, type: "triangle", level: 0.35, detune: 4 },
+          { ratio: 2, type: "sine", level: 0.12 },
+          { ratio: 3, type: "sine", level: 0.05 },
+        ];
+
+        partials.forEach((p) => {
+          const osc = ctx.createOscillator();
+          osc.type = p.type;
+          osc.frequency.value = freq * p.ratio;
+          if (p.detune) osc.detune.value = p.detune;
+          const g = ctx.createGain();
+          g.gain.value = p.level;
+          osc.connect(g);
+          g.connect(master);
+          osc.start();
+
+          sustainOscillatorsRef.current.push({ osc, gain: master });
+        });
+
+        master.connect(ctx.destination);
+        master.gain.setValueAtTime(0, ctx.currentTime);
+        master.gain.linearRampToValueAtTime(gain, ctx.currentTime + 0.05);
+      });
+    },
+    [getCtx]
+  );
+
+  const stopSustain = useCallback(() => {
     const ctx = getCtx();
-    const startAt = ctx.currentTime + delay;
-    const freq = freqFromMidi(midi);
-
-    const master = ctx.createGain();
-    master.gain.value = 0;
-    const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-    if (panner) {
-      panner.pan.value = pan;
-      master.connect(panner);
-      panner.connect(ctx.destination);
-    } else {
-      master.connect(ctx.destination);
-    }
-
-    const partials = [
-      { ratio: 1, type: "sine", level: 1.0 },
-      { ratio: 1, type: "triangle", level: 0.35, detune: 4 },
-      { ratio: 2, type: "sine", level: 0.12 },
-      { ratio: 3, type: "sine", level: 0.05 },
-    ];
-
-    partials.forEach((p) => {
-      const osc = ctx.createOscillator();
-      osc.type = p.type;
-      osc.frequency.value = freq * p.ratio;
-      if (p.detune) osc.detune.value = p.detune;
-      const g = ctx.createGain();
-      g.gain.value = p.level;
-      osc.connect(g);
-      g.connect(master);
-      osc.start(startAt);
-      osc.stop(startAt + duration + 0.1);
+    sustainOscillatorsRef.current.forEach(({ osc, gain }) => {
+      gain.gain.setValueAtTime(gain.gain.value, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
+      osc.stop(ctx.currentTime + 0.3);
     });
-
-    const peak = gain;
-    master.gain.setValueAtTime(0, startAt);
-    master.gain.linearRampToValueAtTime(peak, startAt + 0.015);
-    master.gain.exponentialRampToValueAtTime(peak * 0.55, startAt + 0.25);
-    master.gain.setValueAtTime(peak * 0.55, startAt + Math.max(0.25, duration - 0.35));
-    master.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
-
-    return startAt + duration;
+    sustainOscillatorsRef.current = [];
   }, [getCtx]);
 
-  const playChord = useCallback((midiNotes, { stagger = 0, ...opts } = {}) => {
-    let t = 0;
-    midiNotes.forEach((midi) => {
-      playNote(midi, { ...opts, delay: t });
-      t += stagger;
-    });
-  }, [playNote]);
-
-  return { playNote, playChord, getCtx };
+  return { playNote, playChord, sustainChord, stopSustain, getCtx };
 }
 
 /* ---------------------------------------------------------------
    UI PRIMITIVES
    --------------------------------------------------------------- */
 
-function Knob({ label, value, onChange, options }) {
+interface KnobProps {
+  label: string;
+  value: string | number;
+  onChange: (value: string) => void;
+  options: { value: string | number; label: string }[];
+}
+
+function Knob({ label, value, onChange, options }: KnobProps) {
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-[10px] uppercase tracking-[0.18em] text-amber-200/50 font-medium">
@@ -212,7 +313,9 @@ function Knob({ label, value, onChange, options }) {
         style={{ minWidth: 0 }}
       >
         {options.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
         ))}
       </select>
     </div>
@@ -223,19 +326,32 @@ function Knob({ label, value, onChange, options }) {
    MAIN APP
    --------------------------------------------------------------- */
 
-function EarTrainer() {
-  const { playChord, playNote } = useAudioEngine();
+interface Round {
+  chordType: ChordType;
+  rootMidi: number;
+  rootName: string;
+  voicingStyleUsed: string;
+  degrees: (string | number)[];
+  voicing: number[];
+  targetIdx: number;
+  targetDegree: string | number;
+  targetMidi: number;
+}
 
-  const [rootName, setRootName] = useState("random");
-  const [octave, setOctave] = useState(3);
-  const [chordTypeId, setChordTypeId] = useState("domsharp11");
-  const [voicingStyle, setVoicingStyle] = useState("random");
-  const [mode, setMode] = useState("ascending");
-  const [revealed, setRevealed] = useState(false);
-  const [round, setRound] = useState(null);
-  const [streak, setStreak] = useState(0);
+export default function EarTrainer() {
+  const { playChord, playNote, sustainChord, stopSustain } = useAudioEngine();
 
-  const chordType = CHORD_TYPES.find((c) => c.id === chordTypeId);
+  const [rootName, setRootName] = useState<string>("random");
+  const [octave, setOctave] = useState<number>(3);
+  const [chordTypeId, setChordTypeId] = useState<string>("domsharp11");
+  const [voicingStyle, setVoicingStyle] = useState<string>("random");
+  const [mode, setMode] = useState<string>("ascending");
+  const [revealed, setRevealed] = useState<boolean>(false);
+  const [round, setRound] = useState<Round | null>(null);
+  const [streak, setStreak] = useState<number>(0);
+  const [sustain, setSustain] = useState<boolean>(false);
+
+  const chordType = CHORD_TYPES.find((c) => c.id === chordTypeId)!;
 
   const newRound = useCallback(() => {
     const degrees = chordType.degrees;
@@ -246,16 +362,22 @@ function EarTrainer() {
       rootName === "random"
         ? NOTE_NAMES[Math.floor(Math.random() * NOTE_NAMES.length)]
         : rootName;
-    const rootMidi = NOTE_NAMES.indexOf(actualRootName) + (octave + 1) * 12;
+    const rootMidi =
+      NOTE_NAMES.indexOf(actualRootName) + (octave + 1) * 12;
 
     const actualStyle =
       voicingStyle === "random"
         ? VOICING_STYLES[Math.floor(Math.random() * VOICING_STYLES.length)]
         : voicingStyle;
 
-    const tagged = buildVoicedChord(degrees, rootMidi, actualStyle, Math.random);
+    const tagged = buildVoicedChord(
+      degrees,
+      rootMidi,
+      actualStyle,
+      Math.random
+    );
     const voicing = tagged.map((t) => t.midi);
-    const targetMidi = tagged.find((t) => t.i === targetIdx).midi;
+    const targetMidi = tagged.find((t) => t.i === targetIdx)!.midi;
 
     setRound({
       chordType,
@@ -276,9 +398,17 @@ function EarTrainer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chordTypeId, rootName, octave, voicingStyle]);
 
+  useEffect(() => {
+    if (!sustain) {
+      stopSustain();
+    }
+  }, [sustain, stopSustain]);
+
   const handlePlayChord = () => {
     if (!round) return;
-    if (mode === "block") {
+    if (sustain) {
+      sustainChord(round.voicing, { gain: 0.16 });
+    } else if (mode === "block") {
       playChord(round.voicing, { stagger: 0, duration: 2.2, gain: 0.16 });
     } else {
       playChord(round.voicing, { stagger: 0.34, duration: 1.1, gain: 0.22 });
@@ -291,15 +421,17 @@ function EarTrainer() {
     playNote(round.targetMidi, { duration: 1.6, gain: 0.26 });
   };
 
-  const handleNext = (wasCorrectSelfReport) => {
+  const handleNext = (wasCorrectSelfReport: boolean) => {
     if (wasCorrectSelfReport === true) setStreak((s) => s + 1);
     if (wasCorrectSelfReport === false) setStreak(0);
+    stopSustain();
+    setSustain(false);
     newRound();
   };
 
   const targetNoteName = round ? noteNameFromMidi(round.targetMidi) : null;
 
-  const ordinalSuffix = (d) => {
+  const ordinalSuffix = (d: string | number): string => {
     const s = String(d);
     if (s.endsWith("11") || s.endsWith("12") || s.endsWith("13")) return "th";
     if (s.endsWith("1")) return "st";
@@ -314,7 +446,6 @@ function EarTrainer() {
       style={{ fontFamily: "'Iowan Old Style', Georgia, serif" }}
     >
       <div className="w-full max-w-md">
-
         <div className="mb-7 text-center">
           <div className="text-[11px] uppercase tracking-[0.3em] text-amber-400/60 mb-1.5">
             By Ear
@@ -336,7 +467,9 @@ function EarTrainer() {
               }`}
             />
           ))}
-          <span className="text-xs text-amber-300/50 ml-2 tabular-nums">{streak}</span>
+          <span className="text-xs text-amber-300/50 ml-2 tabular-nums">
+            {streak}
+          </span>
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-3">
@@ -353,7 +486,10 @@ function EarTrainer() {
             label="Octave"
             value={octave}
             onChange={(v) => setOctave(Number(v))}
-            options={[2, 3, 4, 5].map((o) => ({ value: o, label: `C${o}+` }))}
+            options={[2, 3, 4, 5].map((o) => ({
+              value: o,
+              label: `C${o}+`,
+            }))}
           />
         </div>
 
@@ -388,13 +524,26 @@ function EarTrainer() {
             onChange={setChordTypeId}
             options={CHORD_TYPES.map((c) => ({
               value: c.id,
-              label: rootName === "random" ? c.label : `${rootName}${c.label}`,
+              label:
+                rootName === "random" ? c.label : `${rootName}${c.label}`,
             }))}
           />
         </div>
 
-        <div className="relative rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-6 sm:p-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+        <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-lg bg-amber-950/30 border border-amber-900/30">
+          <input
+            type="checkbox"
+            id="sustain-toggle"
+            checked={sustain}
+            onChange={(e) => setSustain(e.target.checked)}
+            className="w-4 h-4 cursor-pointer accent-amber-500"
+          />
+          <label htmlFor="sustain-toggle" className="text-sm text-amber-200 cursor-pointer flex-1">
+            Sustain chord
+          </label>
+        </div>
 
+        <div className="relative rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-6 sm:p-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
           <div className="text-center mb-6">
             <div className="text-[10px] uppercase tracking-[0.25em] text-amber-400/50 mb-1">
               Now sounding
@@ -415,8 +564,18 @@ function EarTrainer() {
                        tracking-wide hover:bg-amber-400 active:scale-[0.98] transition-all duration-150
                        shadow-[0_4px_14px_rgba(245,158,11,0.25)]"
           >
-            ▸ Play the chord
+            ▸ {sustain ? "Play (sustained)" : "Play the chord"}
           </button>
+
+          {sustain && (
+            <button
+              onClick={stopSustain}
+              className="w-full mt-3 py-2.5 rounded-xl bg-red-600/80 text-[#1a1208] font-semibold text-sm
+                         tracking-wide hover:bg-red-500 active:scale-[0.98] transition-all duration-150"
+            >
+              ■ Stop sustain
+            </button>
+          )}
 
           <div className="mt-7 text-center">
             <div className="text-[10px] uppercase tracking-[0.25em] text-amber-400/50 mb-2">
@@ -445,14 +604,17 @@ function EarTrainer() {
           </div>
 
           {revealed && targetNoteName && (
-            <div className="mt-5 text-center">
+            <div className="mt-5 text-center animate-[fadeIn_0.3s_ease-out]">
               <div className="inline-flex flex-col items-center gap-2 px-5 py-3 rounded-xl bg-amber-950/40 border border-amber-800/30">
                 <span className="text-xs text-amber-200/50">
-                  That was the {degreeLabel(round.targetDegree)} — concert pitch
+                  That was the {degreeLabel(round.targetDegree)} — concert
+                  pitch
                 </span>
                 <span className="text-2xl font-semibold text-amber-300">
                   {targetNoteName.name}
-                  <span className="text-amber-200/40 text-base ml-0.5">{targetNoteName.octave}</span>
+                  <span className="text-amber-200/40 text-base ml-0.5">
+                    {targetNoteName.octave}
+                  </span>
                 </span>
               </div>
 
@@ -487,15 +649,14 @@ function EarTrainer() {
 
         <p className="text-center text-[11px] text-amber-200/25 mt-6 leading-relaxed">
           Degrees are counted against the chord's own formula — the requested
-          tone is always a real chord member, including altered 9ths, 11ths and 13ths.
+          tone is always a real chord member, including altered 9ths, 11ths and
+          13ths.
         </p>
       </div>
+
+      <style>{`
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+      `}</style>
     </div>
   );
 }
-
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<EarTrainer />);
-</script>
-</body>
-</html>
