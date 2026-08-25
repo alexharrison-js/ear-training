@@ -73,28 +73,36 @@ function freqFromMidi(midi) {
    the UI can show a warning rather than silently breaking.
    --------------------------------------------------------------- */
 
-function resolveChordAndDegree(chordFilter, degreeFilter) {
+function resolveChordAndDegree(chordFilter, degreeFilter, allowNonChordTones) {
   // 1. Build the pool of candidate chord types
   let pool = chordFilter === "random"
     ? CHORD_TYPES
     : CHORD_TYPES.filter((c) => c.id === chordFilter);
 
-  // 2. If a specific degree is required, narrow to chords that contain it
-  if (degreeFilter !== "random") {
+  // 2. If a specific degree is required AND we're in chord-tones-only mode,
+  //    narrow to chords that actually contain that degree.
+  //    When allowNonChordTones is on this filter is skipped — any degree over any chord.
+  if (degreeFilter !== "random" && !allowNonChordTones) {
     pool = pool.filter((c) =>
       c.degrees.some((d) => String(d) === String(degreeFilter))
     );
   }
 
-  if (pool.length === 0) return null; // incompatible combination
+  if (pool.length === 0) return null; // incompatible combination (only possible when !allowNonChordTones)
 
   // 3. Pick a random chord from what remains
   const chord = pool[Math.floor(Math.random() * pool.length)];
 
-  // 4. Pick the target degree
-  const targetDegree = degreeFilter !== "random"
-    ? chord.degrees.find((d) => String(d) === String(degreeFilter))
-    : chord.degrees[Math.floor(Math.random() * chord.degrees.length)];
+  // 4. Pick the target degree.
+  //    In non-chord-tone mode with random degree, pick from ALL_DEGREES, not just chord members.
+  let targetDegree;
+  if (degreeFilter !== "random") {
+    targetDegree = degreeFilter; // user-specified — may or may not be in chord
+  } else if (allowNonChordTones) {
+    targetDegree = ALL_DEGREES[Math.floor(Math.random() * ALL_DEGREES.length)];
+  } else {
+    targetDegree = chord.degrees[Math.floor(Math.random() * chord.degrees.length)];
+  }
 
   return { chord, targetDegree };
 }
@@ -265,19 +273,20 @@ export default function EarTrainer() {
   const [hideNotes,    setHideNotes]    = useState(false);
 
   // Practice filters — independent of each other, both default to "random"
-  const [chordFilter,  setChordFilter]  = useState("random"); // chord type to drill
-  const [degreeFilter, setDegreeFilter] = useState("random"); // chord tone to target
+  const [chordFilter,        setChordFilter]        = useState("random");
+  const [degreeFilter,       setDegreeFilter]       = useState("random");
+  const [allowNonChordTones, setAllowNonChordTones] = useState(false);
 
   // Round state
-  const [revealed, setRevealed] = useState(false);
-  const [round,    setRound]    = useState(null);
-  const [streak,   setStreak]   = useState(0);
+  const [revealed,     setRevealed]     = useState(false);
+  const [round,        setRound]        = useState(null);
+  const [streak,       setStreak]       = useState(0);
   const [incompatible, setIncompatible] = useState(false);
 
   const newRound = useCallback(() => {
     stopSustain();
 
-    const resolved = resolveChordAndDegree(chordFilter, degreeFilter);
+    const resolved = resolveChordAndDegree(chordFilter, degreeFilter, allowNonChordTones);
     if (!resolved) {
       setIncompatible(true);
       setRound(null);
@@ -287,7 +296,6 @@ export default function EarTrainer() {
     setIncompatible(false);
 
     const { chord, targetDegree } = resolved;
-    const targetIdx = chord.degrees.findIndex((d) => String(d) === String(targetDegree));
 
     const actualRootName = rootName === "random"
       ? NOTE_NAMES[Math.floor(Math.random() * NOTE_NAMES.length)]
@@ -298,9 +306,15 @@ export default function EarTrainer() {
       ? VOICING_STYLES[Math.floor(Math.random() * VOICING_STYLES.length)]
       : voicingStyle;
 
-    const tagged   = buildVoicedChord(chord.degrees, rootMidi, actualStyle, Math.random);
-    const voicing  = tagged.map((t) => t.midi);
-    const targetMidi = tagged.find((t) => t.i === targetIdx).midi;
+    const tagged  = buildVoicedChord(chord.degrees, rootMidi, actualStyle, Math.random);
+    const voicing = tagged.map((t) => t.midi);
+
+    // The target may not be a chord member (non-chord-tone mode), so we compute
+    // its pitch directly from the root rather than looking it up in tagged[].
+    const targetMidi = midiFromRootAndDegree(rootMidi, targetDegree);
+
+    // Flag whether the target is actually in the chord — shown subtly in the UI.
+    const isChordTone = chord.degrees.some((d) => String(d) === String(targetDegree));
 
     setRound({
       chordType: chord,
@@ -310,14 +324,15 @@ export default function EarTrainer() {
       voicing,
       targetDegree,
       targetMidi,
+      isChordTone,
     });
     setRevealed(false);
-  }, [chordFilter, degreeFilter, rootName, octave, voicingStyle, stopSustain]);
+  }, [chordFilter, degreeFilter, allowNonChordTones, rootName, octave, voicingStyle, stopSustain]);
 
   useEffect(() => {
     newRound();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chordFilter, degreeFilter, rootName, octave, voicingStyle]);
+  }, [chordFilter, degreeFilter, allowNonChordTones, rootName, octave, voicingStyle]);
 
   const handlePlayChord = () => {
     if (!round) return;
@@ -408,11 +423,38 @@ export default function EarTrainer() {
             />
           </div>
 
-          {/* Incompatibility warning */}
-          {incompatible && (
+          {/* Allow non-chord-tones checkbox */}
+          <label className="mt-3 flex items-center gap-3 cursor-pointer select-none">
+            <span
+              onClick={() => setAllowNonChordTones((v) => !v)}
+              className={`relative flex-shrink-0 w-4 h-4 rounded border transition-colors duration-150 ${
+                allowNonChordTones
+                  ? "bg-amber-500 border-amber-500"
+                  : "bg-transparent border-amber-700/60"
+              }`}
+            >
+              {allowNonChordTones && (
+                <svg className="absolute inset-0 w-full h-full" viewBox="0 0 16 16" fill="none">
+                  <polyline points="3,8 6.5,11.5 13,5" stroke="#1a1208" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </span>
+            <span
+              onClick={() => setAllowNonChordTones((v) => !v)}
+              className="text-sm text-amber-100 leading-tight"
+            >
+              Allow non-chord tones
+              <span className="block text-[11px] text-amber-200/35 mt-0.5">
+                Target can be any degree, even outside the chord
+              </span>
+            </span>
+          </label>
+
+          {/* Incompatibility warning — only when non-chord-tones are off */}
+          {incompatible && !allowNonChordTones && (
             <div className="mt-3 text-xs text-amber-400/80 bg-amber-900/30 rounded-lg px-3 py-2">
               ⚠ No chord in the list contains the {degreeLabel(degreeFilter)}.
-              Change one of the filters above.
+              Enable "Allow non-chord tones" or change one of the filters above.
             </div>
           )}
         </div>
@@ -555,7 +597,13 @@ export default function EarTrainer() {
             <div className="mt-5 text-center" style={{ animation: "fadeIn 0.3s ease-out" }}>
               <div className="inline-flex flex-col items-center gap-2 px-5 py-3 rounded-xl bg-amber-950/40 border border-amber-800/30">
                 <span className="text-xs text-amber-200/50">
-                  That was the {degreeLabel(round.targetDegree)} — concert pitch
+                  That was the {degreeLabel(round.targetDegree)}
+                  {!round.isChordTone && (
+                    <span className="ml-1.5 text-[10px] uppercase tracking-wide text-amber-500/70">
+                      · non-chord tone
+                    </span>
+                  )}
+                  {" "}— concert pitch
                 </span>
                 <span className="text-2xl font-semibold text-amber-300">
                   {hideNotes ? (
