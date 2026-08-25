@@ -6,62 +6,60 @@ import React, { useState, useRef, useCallback, useEffect } from "react";
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
-// Scale-degree -> semitone offset from root, including alterations.
 const DEGREE_SEMITONES = {
   1: 0, b2: 1, 2: 2, "#2": 3, b3: 3, 3: 4, 4: 5, "#4": 6, b5: 6, 5: 7,
   "#5": 8, b6: 8, 6: 9, bb7: 9, b7: 10, 7: 11,
   b9: 13, 9: 14, "#9": 15, 11: 17, "#11": 18, b13: 20, 13: 21,
 };
 
-// Chord formulas as the degrees present (already designed to come out
-// monotonically ascending in semitone order above the root).
 const CHORD_TYPES = [
-  { id: "maj", label: "maj", degrees: [1, 3, 5] },
-  { id: "min", label: "min", degrees: [1, "b3", 5] },
-  { id: "dim", label: "dim", degrees: [1, "b3", "b5"] },
-  { id: "aug", label: "aug", degrees: [1, 3, "#5"] },
-  { id: "maj7", label: "maj7", degrees: [1, 3, 5, 7] },
-  { id: "min7", label: "min7", degrees: [1, "b3", 5, "b7"] },
-  { id: "dom7", label: "7", degrees: [1, 3, 5, "b7"] },
-  { id: "min7b5", label: "min7b5", degrees: [1, "b3", "b5", "b7"] },
-  { id: "dim7", label: "dim7", degrees: [1, "b3", "b5", "bb7"] },
-  { id: "minMaj7", label: "min(maj7)", degrees: [1, "b3", 5, 7] },
-  { id: "maj9", label: "maj9", degrees: [1, 3, 5, 7, 9] },
-  { id: "min9", label: "min9", degrees: [1, "b3", 5, "b7", 9] },
-  { id: "dom9", label: "9", degrees: [1, 3, 5, "b7", 9] },
-  { id: "dom7sharp9", label: "7#9", degrees: [1, 3, 5, "b7", "#9"] },
-  { id: "dom7flat9", label: "7b9", degrees: [1, 3, 5, "b7", "b9"] },
-  { id: "maj11", label: "maj11", degrees: [1, 3, 5, 7, 9, 11] },
-  { id: "min11", label: "min11", degrees: [1, "b3", 5, "b7", 9, 11] },
-  { id: "dom11", label: "11", degrees: [1, 3, 5, "b7", 9, 11] },
-  { id: "dom7sharp11", label: "7#11", degrees: [1, 3, 5, "b7", "#11"] },
-  { id: "domsharp11", label: "dom7#11", degrees: [1, 3, 5, "b7", 9, "#11"] },
-  { id: "maj13", label: "maj13", degrees: [1, 3, 5, 7, 9, 13] },
-  { id: "min13", label: "min13", degrees: [1, "b3", 5, "b7", 9, 13] },
-  { id: "dom13", label: "13", degrees: [1, 3, 5, "b7", 9, 13] },
-  { id: "dom13sharp11", label: "13#11", degrees: [1, 3, 5, "b7", 9, "#11", 13] },
-  { id: "altDom", label: "7alt", degrees: [1, 3, "b5", "b7", "b9", "#9"] },
-  { id: "sus4", label: "sus4", degrees: [1, 4, 5] },
-  { id: "sus2", label: "sus2", degrees: [1, 2, 5] },
-  { id: "dom7sus4", label: "7sus4", degrees: [1, 4, 5, "b7"] },
-  { id: "add9", label: "add9", degrees: [1, 3, 5, 9] },
-  { id: "six", label: "6", degrees: [1, 3, 5, 6] },
-  { id: "min6", label: "min6", degrees: [1, "b3", 5, 6] },
+  { id: "maj",          label: "maj",        degrees: [1, 3, 5] },
+  { id: "min",          label: "min",        degrees: [1, "b3", 5] },
+  { id: "dim",          label: "dim",        degrees: [1, "b3", "b5"] },
+  { id: "aug",          label: "aug",        degrees: [1, 3, "#5"] },
+  { id: "maj7",         label: "maj7",       degrees: [1, 3, 5, 7] },
+  { id: "min7",         label: "min7",       degrees: [1, "b3", 5, "b7"] },
+  { id: "dom7",         label: "7",          degrees: [1, 3, 5, "b7"] },
+  { id: "min7b5",       label: "min7b5",     degrees: [1, "b3", "b5", "b7"] },
+  { id: "dim7",         label: "dim7",       degrees: [1, "b3", "b5", "bb7"] },
+  { id: "minMaj7",      label: "min(maj7)",  degrees: [1, "b3", 5, 7] },
+  { id: "maj9",         label: "maj9",       degrees: [1, 3, 5, 7, 9] },
+  { id: "min9",         label: "min9",       degrees: [1, "b3", 5, "b7", 9] },
+  { id: "dom9",         label: "9",          degrees: [1, 3, 5, "b7", 9] },
+  { id: "dom7sharp9",   label: "7#9",        degrees: [1, 3, 5, "b7", "#9"] },
+  { id: "dom7flat9",    label: "7b9",        degrees: [1, 3, 5, "b7", "b9"] },
+  { id: "maj11",        label: "maj11",      degrees: [1, 3, 5, 7, 9, 11] },
+  { id: "min11",        label: "min11",      degrees: [1, "b3", 5, "b7", 9, 11] },
+  { id: "dom11",        label: "11",         degrees: [1, 3, 5, "b7", 9, 11] },
+  { id: "dom7sharp11",  label: "7#11",       degrees: [1, 3, 5, "b7", "#11"] },
+  { id: "domsharp11",   label: "dom7#11",    degrees: [1, 3, 5, "b7", 9, "#11"] },
+  { id: "maj13",        label: "maj13",      degrees: [1, 3, 5, 7, 9, 13] },
+  { id: "min13",        label: "min13",      degrees: [1, "b3", 5, "b7", 9, 13] },
+  { id: "dom13",        label: "13",         degrees: [1, 3, 5, "b7", 9, 13] },
+  { id: "dom13sharp11", label: "13#11",      degrees: [1, 3, 5, "b7", 9, "#11", 13] },
+  { id: "altDom",       label: "7alt",       degrees: [1, 3, "b5", "b7", "b9", "#9"] },
+  { id: "sus4",         label: "sus4",       degrees: [1, 4, 5] },
+  { id: "sus2",         label: "sus2",       degrees: [1, 2, 5] },
+  { id: "dom7sus4",     label: "7sus4",      degrees: [1, 4, 5, "b7"] },
+  { id: "add9",         label: "add9",       degrees: [1, 3, 5, 9] },
+  { id: "six",          label: "6",          degrees: [1, 3, 5, 6] },
+  { id: "min6",         label: "min6",       degrees: [1, "b3", 5, 6] },
 ];
 
-function degreeLabel(d) {
-  return String(d);
-}
+// Ordered union of every degree that appears in any chord formula.
+const ALL_DEGREES = [1, 2, "b3", 3, 4, "b5", 5, "#5", "bb7", 6, "b7", 7,
+                     "b9", 9, "#9", 11, "#11", 13];
+
+function degreeLabel(d) { return String(d); }
 
 function midiFromRootAndDegree(rootMidi, degree) {
-  const semis = DEGREE_SEMITONES[degree];
-  return rootMidi + semis;
+  return rootMidi + DEGREE_SEMITONES[degree];
 }
 
 function noteNameFromMidi(midi) {
   const name = NOTE_NAMES[((midi % 12) + 12) % 12];
   const octave = Math.floor(midi / 12) - 1;
-  return { name, octave, full: `${name}${octave}` };
+  return { name, octave };
 }
 
 function freqFromMidi(midi) {
@@ -69,15 +67,40 @@ function freqFromMidi(midi) {
 }
 
 /* ---------------------------------------------------------------
+   FILTER RESOLUTION
+   Both filters operate independently. If the combination is
+   impossible (e.g. degree=#11 + chord=min7) we return null so
+   the UI can show a warning rather than silently breaking.
+   --------------------------------------------------------------- */
+
+function resolveChordAndDegree(chordFilter, degreeFilter) {
+  // 1. Build the pool of candidate chord types
+  let pool = chordFilter === "random"
+    ? CHORD_TYPES
+    : CHORD_TYPES.filter((c) => c.id === chordFilter);
+
+  // 2. If a specific degree is required, narrow to chords that contain it
+  if (degreeFilter !== "random") {
+    pool = pool.filter((c) =>
+      c.degrees.some((d) => String(d) === String(degreeFilter))
+    );
+  }
+
+  if (pool.length === 0) return null; // incompatible combination
+
+  // 3. Pick a random chord from what remains
+  const chord = pool[Math.floor(Math.random() * pool.length)];
+
+  // 4. Pick the target degree
+  const targetDegree = degreeFilter !== "random"
+    ? chord.degrees.find((d) => String(d) === String(degreeFilter))
+    : chord.degrees[Math.floor(Math.random() * chord.degrees.length)];
+
+  return { chord, targetDegree };
+}
+
+/* ---------------------------------------------------------------
    VOICING ENGINE
-   Randomizes how the chord tones are distributed across octaves —
-   close (root position, tight stack), inverted (a non-root tone
-   becomes the lowest voice), spread (alternating tones lifted an
-   octave for an open sound), and drop2 (the second-from-top voice
-   dropped an octave, a classic jazz piano voicing). The target
-   tone's identity is tracked by its original formula index, so the
-   "answer" always reflects whatever octave it actually sounds at
-   in that particular voicing.
    --------------------------------------------------------------- */
 
 const VOICING_STYLES = ["close", "inverted", "spread", "drop2"];
@@ -88,7 +111,7 @@ function buildVoicedChord(degrees, rootMidi, style, rng) {
   const n = tagged.length;
 
   if (style === "inverted" && n > 1) {
-    const inversion = 1 + Math.floor(rng() * (n - 1)); // how many low tones flip up an octave
+    const inversion = 1 + Math.floor(rng() * (n - 1));
     tagged = tagged.map((t, idx) => (idx < inversion ? { ...t, midi: t.midi + 12 } : t));
   } else if (style === "spread" && n > 2) {
     tagged = tagged.map((t, idx) => (idx % 2 === 1 ? { ...t, midi: t.midi + 12 } : t));
@@ -96,10 +119,9 @@ function buildVoicedChord(degrees, rootMidi, style, rng) {
     const idx = n - 2;
     tagged[idx] = { ...tagged[idx], midi: tagged[idx].midi - 12 };
   }
-  // "close" falls through unchanged: straightforward root-position stack.
 
   tagged.sort((a, b) => a.midi - b.midi);
-  return tagged; // each entry: { midi, i } where i is the index into `degrees`
+  return tagged;
 }
 
 /* ---------------------------------------------------------------
@@ -108,128 +130,31 @@ function buildVoicedChord(degrees, rootMidi, style, rng) {
 
 function useAudioEngine() {
   const ctxRef = useRef(null);
-  const sustainedRef = useRef(null);
+  const sustainVoicesRef = useRef([]);
+
   const getCtx = useCallback(() => {
     if (!ctxRef.current) {
       ctxRef.current = new (window.AudioContext || window.webkitAudioContext)();
     }
-    if (ctxRef.current.state === "suspended") {
-      ctxRef.current.resume();
-    }
+    if (ctxRef.current.state === "suspended") ctxRef.current.resume();
     return ctxRef.current;
   }, []);
-const stopSustainedChord = useCallback((release = 0.8) => {
-  const ctx = getCtx();
-  const active = sustainedRef.current;
 
-  if (!active) return;
+  const PARTIALS = [
+    { ratio: 1, type: "sine",     level: 1.0  },
+    { ratio: 1, type: "triangle", level: 0.35, detune: 4 },
+    { ratio: 2, type: "sine",     level: 0.12 },
+    { ratio: 3, type: "sine",     level: 0.05 },
+  ];
 
-  const now = ctx.currentTime;
-
-  active.master.gain.cancelScheduledValues(now);
-  active.master.gain.setValueAtTime(
-    Math.max(active.master.gain.value || 0.0001, 0.0001),
-    now
-  );
-
-  active.master.gain.exponentialRampToValueAtTime(
-    0.0001,
-    now + release
-  );
-
-  active.oscillators.forEach((osc) => {
-    try {
-      osc.stop(now + release + 0.05);
-    } catch {}
-  });
-
-  sustainedRef.current = null;
-}, [getCtx]);
-  const playSustainedChord = useCallback((midiNotes, { gain = 0.16 } = {}) => {
-  const ctx = getCtx();
-
-  stopSustainedChord();
-
-  const master = ctx.createGain();
-  master.connect(ctx.destination);
-
-  const oscillators = [];
-
-  master.gain.setValueAtTime(0, ctx.currentTime);
-  master.gain.linearRampToValueAtTime(
-    gain,
-    ctx.currentTime + 0.015
-  );
-
-  master.gain.exponentialRampToValueAtTime(
-    gain * 0.55,
-    ctx.currentTime + 0.25
-  );
-
-  midiNotes.forEach((midi) => {
-    const freq = freqFromMidi(midi);
-
-    const partials = [
-      { ratio: 1, type: "sine", level: 1.0 },
-      { ratio: 1, type: "triangle", level: 0.35, detune: 4 },
-      { ratio: 2, type: "sine", level: 0.12 },
-      { ratio: 3, type: "sine", level: 0.05 },
-    ];
-
-    partials.forEach((p) => {
-      const osc = ctx.createOscillator();
-
-      osc.type = p.type;
-      osc.frequency.value = freq * p.ratio;
-
-      if (p.detune) {
-        osc.detune.value = p.detune;
-      }
-
-      const g = ctx.createGain();
-      g.gain.value = p.level;
-
-      osc.connect(g);
-      g.connect(master);
-
-      osc.start();
-
-      oscillators.push(osc);
-    });
-  });
-
-  sustainedRef.current = {
-    oscillators,
-    master,
-  };
-}, [getCtx, stopSustainedChord]);
-  
-  // Warm, slightly electric-piano-ish tone: a few detuned sine/triangle
-  // partials with a soft envelope. Easy on the ear for long sessions.
-  const playNote = useCallback((midi, { duration = 1.4, delay = 0, gain = 0.22, pan = 0 } = {}) => {
+  const playNote = useCallback((midi, { duration = 1.4, delay = 0, gain = 0.22 } = {}) => {
     const ctx = getCtx();
     const startAt = ctx.currentTime + delay;
     const freq = freqFromMidi(midi);
-
     const master = ctx.createGain();
     master.gain.value = 0;
-    const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-    if (panner) {
-      panner.pan.value = pan;
-      master.connect(panner);
-      panner.connect(ctx.destination);
-    } else {
-      master.connect(ctx.destination);
-    }
-
-    const partials = [
-      { ratio: 1, type: "sine", level: 1.0 },
-      { ratio: 1, type: "triangle", level: 0.35, detune: 4 },
-      { ratio: 2, type: "sine", level: 0.12 },
-      { ratio: 3, type: "sine", level: 0.05 },
-    ];
-
-    partials.forEach((p) => {
+    master.connect(ctx.destination);
+    PARTIALS.forEach((p) => {
       const osc = ctx.createOscillator();
       osc.type = p.type;
       osc.frequency.value = freq * p.ratio;
@@ -241,32 +166,61 @@ const stopSustainedChord = useCallback((release = 0.8) => {
       osc.start(startAt);
       osc.stop(startAt + duration + 0.1);
     });
-
     const peak = gain;
     master.gain.setValueAtTime(0, startAt);
     master.gain.linearRampToValueAtTime(peak, startAt + 0.015);
     master.gain.exponentialRampToValueAtTime(peak * 0.55, startAt + 0.25);
     master.gain.setValueAtTime(peak * 0.55, startAt + Math.max(0.25, duration - 0.35));
     master.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
-
-    return startAt + duration;
   }, [getCtx]);
 
   const playChord = useCallback((midiNotes, { stagger = 0, ...opts } = {}) => {
     let t = 0;
-    midiNotes.forEach((midi) => {
-      playNote(midi, { ...opts, delay: t });
-      t += stagger;
-    });
+    midiNotes.forEach((midi) => { playNote(midi, { ...opts, delay: t }); t += stagger; });
   }, [playNote]);
 
-return {
-  playNote,
-  playChord,
-  playSustainedChord,
-  stopSustainedChord,
-  getCtx,
-};
+  const stopSustain = useCallback((fadeSeconds = 0.25) => {
+    const ctx = getCtx();
+    const now = ctx.currentTime;
+    sustainVoicesRef.current.forEach(({ oscs, gainNode }) => {
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, now + fadeSeconds);
+      oscs.forEach((osc) => osc.stop(now + fadeSeconds + 0.05));
+    });
+    sustainVoicesRef.current = [];
+  }, [getCtx]);
+
+  const sustainChord = useCallback((midiNotes, { gain = 0.18, stagger = 0 } = {}) => {
+    const ctx = getCtx();
+    stopSustain(0.05);
+    let t = 0;
+    midiNotes.forEach((midi) => {
+      const startAt = ctx.currentTime + t;
+      const freq = freqFromMidi(midi);
+      const master = ctx.createGain();
+      master.gain.value = 0;
+      master.connect(ctx.destination);
+      const oscs = PARTIALS.map((p) => {
+        const osc = ctx.createOscillator();
+        osc.type = p.type;
+        osc.frequency.value = freq * p.ratio;
+        if (p.detune) osc.detune.value = p.detune;
+        const g = ctx.createGain();
+        g.gain.value = p.level;
+        osc.connect(g);
+        g.connect(master);
+        osc.start(startAt);
+        return osc;
+      });
+      master.gain.setValueAtTime(0, startAt);
+      master.gain.linearRampToValueAtTime(gain, startAt + 0.02);
+      sustainVoicesRef.current.push({ oscs, gainNode: master });
+      t += stagger;
+    });
+  }, [getCtx, stopSustain]);
+
+  return { playNote, playChord, sustainChord, stopSustain };
 }
 
 /* ---------------------------------------------------------------
@@ -300,102 +254,91 @@ function Knob({ label, value, onChange, options }) {
    --------------------------------------------------------------- */
 
 export default function EarTrainer() {
-const {
-  playChord,
-  playNote,
-  playSustainedChord,
-  stopSustainedChord,
-} = useAudioEngine();
+  const { playChord, playNote, sustainChord, stopSustain } = useAudioEngine();
 
-  const [rootName, setRootName] = useState("random");
-  const [octave, setOctave] = useState(3);
-  const [chordTypeId, setChordTypeId] = useState("domsharp11");
+  // Playback controls
+  const [rootName,     setRootName]     = useState("random");
+  const [octave,       setOctave]       = useState(3);
   const [voicingStyle, setVoicingStyle] = useState("random");
-  const [mode, setMode] = useState("ascending");
+  const [mode,         setMode]         = useState("ascending");
+  const [sustain,      setSustain]      = useState(false);
+
+  // Practice filters — independent of each other, both default to "random"
+  const [chordFilter,  setChordFilter]  = useState("random"); // chord type to drill
+  const [degreeFilter, setDegreeFilter] = useState("random"); // chord tone to target
+
+  // Round state
   const [revealed, setRevealed] = useState(false);
-  const [round, setRound] = useState(null);
-  const [streak, setStreak] = useState(0);
-  const [sustainChord, setSustainChord] = useState(false);
-  const chordType = CHORD_TYPES.find((c) => c.id === chordTypeId);
+  const [round,    setRound]    = useState(null);
+  const [streak,   setStreak]   = useState(0);
+  const [incompatible, setIncompatible] = useState(false);
 
   const newRound = useCallback(() => {
-    stopSustainedChord();
-    const degrees = chordType.degrees;
-    const targetIdx = Math.floor(Math.random() * degrees.length);
-    const targetDegree = degrees[targetIdx];
+    stopSustain();
 
-    const actualRootName =
-      rootName === "random"
-        ? NOTE_NAMES[Math.floor(Math.random() * NOTE_NAMES.length)]
-        : rootName;
+    const resolved = resolveChordAndDegree(chordFilter, degreeFilter);
+    if (!resolved) {
+      setIncompatible(true);
+      setRound(null);
+      setRevealed(false);
+      return;
+    }
+    setIncompatible(false);
+
+    const { chord, targetDegree } = resolved;
+    const targetIdx = chord.degrees.findIndex((d) => String(d) === String(targetDegree));
+
+    const actualRootName = rootName === "random"
+      ? NOTE_NAMES[Math.floor(Math.random() * NOTE_NAMES.length)]
+      : rootName;
     const rootMidi = NOTE_NAMES.indexOf(actualRootName) + (octave + 1) * 12;
 
-    const actualStyle =
-      voicingStyle === "random"
-        ? VOICING_STYLES[Math.floor(Math.random() * VOICING_STYLES.length)]
-        : voicingStyle;
+    const actualStyle = voicingStyle === "random"
+      ? VOICING_STYLES[Math.floor(Math.random() * VOICING_STYLES.length)]
+      : voicingStyle;
 
-    const tagged = buildVoicedChord(degrees, rootMidi, actualStyle, Math.random);
-    const voicing = tagged.map((t) => t.midi);
+    const tagged   = buildVoicedChord(chord.degrees, rootMidi, actualStyle, Math.random);
+    const voicing  = tagged.map((t) => t.midi);
     const targetMidi = tagged.find((t) => t.i === targetIdx).midi;
 
     setRound({
-      chordType,
-      rootMidi,
+      chordType: chord,
       rootName: actualRootName,
       voicingStyleUsed: actualStyle,
-      degrees,
+      degrees: chord.degrees,
       voicing,
-      targetIdx,
       targetDegree,
       targetMidi,
     });
     setRevealed(false);
-}, [chordType, rootName, octave, voicingStyle, stopSustainedChord]);
+  }, [chordFilter, degreeFilter, rootName, octave, voicingStyle, stopSustain]);
 
   useEffect(() => {
     newRound();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chordTypeId, rootName, octave, voicingStyle]);
-useEffect(() => {
-  return () => {
-    stopSustainedChord();
+  }, [chordFilter, degreeFilter, rootName, octave, voicingStyle]);
+
+  const handlePlayChord = () => {
+    if (!round) return;
+    if (sustain) {
+      sustainChord(round.voicing, { gain: 0.16, stagger: mode === "ascending" ? 0.34 : 0 });
+    } else if (mode === "block") {
+      playChord(round.voicing, { stagger: 0, duration: 2.2, gain: 0.16 });
+    } else {
+      playChord(round.voicing, { stagger: 0.34, duration: 1.1, gain: 0.22 });
+    }
   };
-}, [stopSustainedChord]);
-const handlePlayChord = () => {
-  if (!round) return;
-
-  if (sustainChord) {
-    playSustainedChord(round.voicing, {
-      gain: 0.16,
-    });
-    return;
-  }
-
-  if (mode === "block") {
-    playChord(round.voicing, {
-      stagger: 0,
-      duration: 2.2,
-      gain: 0.16,
-    });
-  } else {
-    playChord(round.voicing, {
-      stagger: 0.34,
-      duration: 1.1,
-      gain: 0.22,
-    });
-  }
-};
 
   const handleReveal = () => {
     if (!round) return;
+    stopSustain();
     setRevealed(true);
     playNote(round.targetMidi, { duration: 1.6, gain: 0.26 });
   };
 
-  const handleNext = (wasCorrectSelfReport) => {
-    if (wasCorrectSelfReport === true) setStreak((s) => s + 1);
-    if (wasCorrectSelfReport === false) setStreak(0);
+  const handleNext = (correct) => {
+    if (correct === true)  setStreak((s) => s + 1);
+    if (correct === false) setStreak(0);
     newRound();
   };
 
@@ -410,6 +353,10 @@ const handlePlayChord = () => {
     return "th";
   };
 
+  // For the chord type dropdown label: show root prefix only when root is fixed
+  const chordLabel = (c) =>
+    rootName === "random" ? c.label : `${rootName}${c.label}`;
+
   return (
     <div
       className="min-h-screen w-full bg-[#120d0a] text-amber-50 flex items-start justify-center px-4 py-8 sm:py-12"
@@ -417,30 +364,59 @@ const handlePlayChord = () => {
     >
       <div className="w-full max-w-md">
 
+        {/* Header */}
         <div className="mb-7 text-center">
-          <div className="text-[11px] uppercase tracking-[0.3em] text-amber-400/60 mb-1.5">
-            By Ear
-          </div>
-          <h1 className="text-2xl font-semibold text-amber-50 tracking-tight">
-            Chord Tone Trainer
-          </h1>
-          <p className="text-sm text-amber-200/40 mt-1">
-            Hear the chord. Name the degree. Check the pitch.
-          </p>
+          <div className="text-[11px] uppercase tracking-[0.3em] text-amber-400/60 mb-1.5">By Ear</div>
+          <h1 className="text-2xl font-semibold tracking-tight">Chord Tone Trainer</h1>
+          <p className="text-sm text-amber-200/40 mt-1">Hear the chord. Name the degree. Check the pitch.</p>
         </div>
 
+        {/* Streak */}
         <div className="flex items-center justify-center gap-2 mb-6">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div
-              key={i}
-              className={`h-1 w-5 rounded-full transition-colors duration-300 ${
-                i < streak % 8 && streak > 0 ? "bg-amber-400" : "bg-amber-900/40"
-              }`}
-            />
+            <div key={i} className={`h-1 w-5 rounded-full transition-colors duration-300 ${
+              i < streak % 8 && streak > 0 ? "bg-amber-400" : "bg-amber-900/40"
+            }`} />
           ))}
           <span className="text-xs text-amber-300/50 ml-2 tabular-nums">{streak}</span>
         </div>
 
+        {/* ── PRACTICE FILTERS ── */}
+        <div className="mb-4 rounded-xl border border-amber-500/20 bg-amber-950/30 p-3.5">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-amber-400/60 mb-3">
+            Practice focus
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Knob
+              label="Chord type"
+              value={chordFilter}
+              onChange={setChordFilter}
+              options={[
+                { value: "random", label: "Random" },
+                ...CHORD_TYPES.map((c) => ({ value: c.id, label: chordLabel(c) })),
+              ]}
+            />
+            <Knob
+              label="Target degree"
+              value={String(degreeFilter)}
+              onChange={(v) => setDegreeFilter(v === "random" ? "random" : v)}
+              options={[
+                { value: "random", label: "Random" },
+                ...ALL_DEGREES.map((d) => ({ value: String(d), label: degreeLabel(d) })),
+              ]}
+            />
+          </div>
+
+          {/* Incompatibility warning */}
+          {incompatible && (
+            <div className="mt-3 text-xs text-amber-400/80 bg-amber-900/30 rounded-lg px-3 py-2">
+              ⚠ No chord in the list contains the {degreeLabel(degreeFilter)}.
+              Change one of the filters above.
+            </div>
+          )}
+        </div>
+
+        {/* ── PLAYBACK SETTINGS ── */}
         <div className="grid grid-cols-2 gap-3 mb-3">
           <Knob
             label="Root"
@@ -459,17 +435,17 @@ const handlePlayChord = () => {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mb-5">
+        <div className="grid grid-cols-2 gap-3 mb-4">
           <Knob
             label="Voicing"
             value={voicingStyle}
             onChange={setVoicingStyle}
             options={[
-              { value: "random", label: "Random" },
-              { value: "close", label: "Close" },
+              { value: "random",   label: "Random"   },
+              { value: "close",    label: "Close"    },
               { value: "inverted", label: "Inverted" },
-              { value: "spread", label: "Spread" },
-              { value: "drop2", label: "Drop 2" },
+              { value: "spread",   label: "Spread"   },
+              { value: "drop2",    label: "Drop 2"   },
             ]}
           />
           <Knob
@@ -478,48 +454,31 @@ const handlePlayChord = () => {
             onChange={setMode}
             options={[
               { value: "ascending", label: "Arpeggio" },
-              { value: "block", label: "Block" },
+              { value: "block",     label: "Block"    },
             ]}
           />
         </div>
-        <div className="mb-5 flex items-center">
-  <label className="flex items-center gap-2 text-sm text-amber-200/70 cursor-pointer">
-    <input
-      type="checkbox"
-      checked={sustainChord}
-      onChange={(e) => {
-        setSustainChord(e.target.checked);
 
-        if (!e.target.checked) {
-          stopSustainedChord();
-        }
-      }}
-      className="accent-amber-500"
-    />
-    Sustain chord
-  </label>
-</div>
-
-        <div className="mb-2">
-          <Knob
-            label="Chord type"
-            value={chordTypeId}
-            onChange={setChordTypeId}
-            options={CHORD_TYPES.map((c) => ({
-              value: c.id,
-              label: rootName === "random" ? c.label : `${rootName}${c.label}`,
-            }))}
-          />
+        {/* Sustain toggle */}
+        <div className="mb-5 flex items-center justify-between px-4 py-3 rounded-xl bg-[#1a1410] border border-amber-900/40">
+          <span className="text-sm text-amber-100">Sustain chord</span>
+          <button
+            onClick={() => { const next = !sustain; setSustain(next); if (!next) stopSustain(); }}
+            role="switch"
+            aria-checked={sustain}
+            className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${sustain ? "bg-amber-500" : "bg-amber-900/50"}`}
+          >
+            <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-[#120d0a] transition-transform duration-200 ${sustain ? "translate-x-5" : "translate-x-0"}`} />
+          </button>
         </div>
 
+        {/* ── ROUND CARD ── */}
         <div className="relative rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-6 sm:p-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
 
           <div className="text-center mb-6">
-            <div className="text-[10px] uppercase tracking-[0.25em] text-amber-400/50 mb-1">
-              Now sounding
-            </div>
-            <div className="text-3xl font-semibold text-amber-50">
-              {round ? round.rootName : rootName}{chordType.label}
+            <div className="text-[10px] uppercase tracking-[0.25em] text-amber-400/50 mb-1">Now sounding</div>
+            <div className="text-3xl font-semibold">
+              {round ? round.rootName : "—"}{round ? round.chordType.label : ""}
             </div>
             {round && (
               <div className="text-[11px] text-amber-200/30 mt-1 capitalize">
@@ -528,43 +487,55 @@ const handlePlayChord = () => {
             )}
           </div>
 
-          <button
-            onClick={handlePlayChord}
-            className="w-full py-3.5 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm
-                       tracking-wide hover:bg-amber-400 active:scale-[0.98] transition-all duration-150
-                       shadow-[0_4px_14px_rgba(245,158,11,0.25)]"
-          >
-            ▸ Play the chord
-          </button>
+          {/* Play button + stop */}
+          <div className="flex gap-3">
+            <button
+              onClick={handlePlayChord}
+              disabled={!round}
+              className="flex-1 py-3.5 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm
+                         tracking-wide hover:bg-amber-400 active:scale-[0.98] transition-all duration-150
+                         shadow-[0_4px_14px_rgba(245,158,11,0.25)] disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              ▸ {sustain ? "Play & hold" : "Play the chord"}
+            </button>
+            {sustain && (
+              <button
+                onClick={() => stopSustain()}
+                className="px-5 py-3.5 rounded-xl border border-amber-500/40 text-amber-200 font-semibold text-sm
+                           hover:bg-amber-500/10 active:scale-[0.98] transition-all"
+                aria-label="Stop"
+              >■</button>
+            )}
+          </div>
 
+          {/* Prompt */}
           <div className="mt-7 text-center">
-            <div className="text-[10px] uppercase tracking-[0.25em] text-amber-400/50 mb-2">
-              Your turn
-            </div>
-            <div className="text-xl text-amber-50">
+            <div className="text-[10px] uppercase tracking-[0.25em] text-amber-400/50 mb-2">Your turn</div>
+            <div className="text-xl">
               Play or sing the{" "}
               <span className="font-semibold text-amber-300">
                 {round ? degreeLabel(round.targetDegree) : "…"}
               </span>
               {round ? ordinalSuffix(round.targetDegree) : ""}
             </div>
-            <div className="text-xs text-amber-200/35 mt-1.5">
-              by ear, before checking
-            </div>
+            <div className="text-xs text-amber-200/35 mt-1.5">by ear, before checking</div>
           </div>
 
-          <div className="mt-6 flex gap-3">
+          {/* Check */}
+          <div className="mt-6">
             <button
               onClick={handleReveal}
-              className="flex-1 py-3 rounded-xl border border-amber-500/40 text-amber-200 font-medium text-sm
-                         hover:bg-amber-500/10 active:scale-[0.98] transition-all duration-150"
+              disabled={!round}
+              className="w-full py-3 rounded-xl border border-amber-500/40 text-amber-200 font-medium text-sm
+                         hover:bg-amber-500/10 active:scale-[0.98] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
             >
               ♪ Check my answer
             </button>
           </div>
 
+          {/* Reveal */}
           {revealed && targetNoteName && (
-            <div className="mt-5 text-center animate-[fadeIn_0.3s_ease-out]">
+            <div className="mt-5 text-center" style={{ animation: "fadeIn 0.3s ease-out" }}>
               <div className="inline-flex flex-col items-center gap-2 px-5 py-3 rounded-xl bg-amber-950/40 border border-amber-800/30">
                 <span className="text-xs text-amber-200/50">
                   That was the {degreeLabel(round.targetDegree)} — concert pitch
@@ -574,39 +545,31 @@ const handlePlayChord = () => {
                   <span className="text-amber-200/40 text-base ml-0.5">{targetNoteName.octave}</span>
                 </span>
               </div>
-
               <div className="flex gap-3 mt-5">
                 <button
                   onClick={() => handleNext(false)}
                   className="flex-1 py-2.5 rounded-lg border border-amber-900/40 text-amber-200/60 text-sm
                              hover:bg-amber-900/20 active:scale-[0.98] transition-all"
-                >
-                  Missed it
-                </button>
+                >Missed it</button>
                 <button
                   onClick={() => handleNext(true)}
                   className="flex-1 py-2.5 rounded-lg bg-amber-600/90 text-[#1a1208] font-medium text-sm
                              hover:bg-amber-500 active:scale-[0.98] transition-all"
-                >
-                  Got it →
-                </button>
+                >Got it →</button>
               </div>
             </div>
           )}
 
-          {!revealed && (
+          {!revealed && round && (
             <button
               onClick={newRound}
               className="w-full mt-5 py-2 text-xs text-amber-200/30 hover:text-amber-200/60 transition-colors"
-            >
-              skip — new chord
-            </button>
+            >skip — new chord</button>
           )}
         </div>
 
         <p className="text-center text-[11px] text-amber-200/25 mt-6 leading-relaxed">
-          Degrees are counted against the chord's own formula — the requested
-          tone is always a real chord member, including altered 9ths, 11ths and 13ths.
+          Both filters are independent — combine any chord type with any degree it contains.
         </p>
       </div>
 
