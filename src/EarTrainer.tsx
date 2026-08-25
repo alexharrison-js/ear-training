@@ -262,6 +262,7 @@ export default function EarTrainer() {
   const [voicingStyle, setVoicingStyle] = useState("random");
   const [mode,         setMode]         = useState("ascending");
   const [sustain,      setSustain]      = useState(false);
+  const [hideNotes,    setHideNotes]    = useState(false);
 
   // Practice filters — independent of each other, both default to "random"
   const [chordFilter,  setChordFilter]  = useState("random"); // chord type to drill
@@ -459,17 +460,33 @@ export default function EarTrainer() {
           />
         </div>
 
-        {/* Sustain toggle */}
-        <div className="mb-5 flex items-center justify-between px-4 py-3 rounded-xl bg-[#1a1410] border border-amber-900/40">
-          <span className="text-sm text-amber-100">Sustain chord</span>
-          <button
-            onClick={() => { const next = !sustain; setSustain(next); if (!next) stopSustain(); }}
-            role="switch"
-            aria-checked={sustain}
-            className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${sustain ? "bg-amber-500" : "bg-amber-900/50"}`}
-          >
-            <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-[#120d0a] transition-transform duration-200 ${sustain ? "translate-x-5" : "translate-x-0"}`} />
-          </button>
+        {/* Sustain + Hide Notes toggles */}
+        <div className="mb-5 rounded-xl bg-[#1a1410] border border-amber-900/40 divide-y divide-amber-900/30">
+          <div className="flex items-center justify-between px-4 py-3">
+            <span className="text-sm text-amber-100">Sustain chord</span>
+            <button
+              onClick={() => { const next = !sustain; setSustain(next); if (!next) stopSustain(); }}
+              role="switch"
+              aria-checked={sustain}
+              className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${sustain ? "bg-amber-500" : "bg-amber-900/50"}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-[#120d0a] transition-transform duration-200 ${sustain ? "translate-x-5" : "translate-x-0"}`} />
+            </button>
+          </div>
+          <div className="flex items-center justify-between px-4 py-3">
+            <div>
+              <span className="text-sm text-amber-100">Hide note names</span>
+              <p className="text-[11px] text-amber-200/35 mt-0.5">Chord shows type only · answer shows —</p>
+            </div>
+            <button
+              onClick={() => setHideNotes((h) => !h)}
+              role="switch"
+              aria-checked={hideNotes}
+              className={`relative w-11 h-6 rounded-full transition-colors duration-200 flex-shrink-0 ml-4 ${hideNotes ? "bg-amber-500" : "bg-amber-900/50"}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-[#120d0a] transition-transform duration-200 ${hideNotes ? "translate-x-5" : "translate-x-0"}`} />
+            </button>
+          </div>
         </div>
 
         {/* ── ROUND CARD ── */}
@@ -478,7 +495,7 @@ export default function EarTrainer() {
           <div className="text-center mb-6">
             <div className="text-[10px] uppercase tracking-[0.25em] text-amber-400/50 mb-1">Now sounding</div>
             <div className="text-3xl font-semibold">
-              {round ? round.rootName : "—"}{round ? round.chordType.label : ""}
+              {round ? (hideNotes ? "" : round.rootName) : "—"}{round ? round.chordType.label : ""}
             </div>
             {round && (
               <div className="text-[11px] text-amber-200/30 mt-1 capitalize">
@@ -541,8 +558,14 @@ export default function EarTrainer() {
                   That was the {degreeLabel(round.targetDegree)} — concert pitch
                 </span>
                 <span className="text-2xl font-semibold text-amber-300">
-                  {targetNoteName.name}
-                  <span className="text-amber-200/40 text-base ml-0.5">{targetNoteName.octave}</span>
+                  {hideNotes ? (
+                    <span className="tracking-widest text-amber-200/40">—</span>
+                  ) : (
+                    <>
+                      {targetNoteName.name}
+                      <span className="text-amber-200/40 text-base ml-0.5">{targetNoteName.octave}</span>
+                    </>
+                  )}
                 </span>
               </div>
               <div className="flex gap-3 mt-5">
