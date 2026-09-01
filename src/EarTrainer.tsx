@@ -606,12 +606,20 @@ export default function EarTrainer() {
                   {!round.isChordTone && <span className="ml-1 text-amber-500/70">· non-chord</span>}
                   {" "}— concert pitch
                 </span>
-                <span className="text-xl font-semibold text-amber-300">
-                  {hideNotes
-                    ? <span className="tracking-widest text-amber-200/40">—</span>
-                    : <>{targetNoteName.name}<span className="text-amber-200/40 text-sm ml-0.5">{targetNoteName.octave}</span></>
-                  }
-                </span>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-xl font-semibold text-amber-300">
+                    {hideNotes
+                      ? <span className="tracking-widest text-amber-200/40">—</span>
+                      : <>{targetNoteName.name}<span className="text-amber-200/40 text-sm ml-0.5">{targetNoteName.octave}</span></>
+                    }
+                  </span>
+                  <button
+                    onClick={() => playNote(round.targetMidi, { duration: 1.6, gain: 0.26 })}
+                    className="text-amber-400/70 hover:text-amber-300 active:scale-90 transition-all text-base leading-none"
+                    aria-label="Play again"
+                    title="Play again"
+                  >↺</button>
+                </div>
               </div>
 
               {!isAutoRunning && (
