@@ -274,11 +274,13 @@ export default function EarTrainer() {
   const [allowNonChordTones, setAllowNonChordTones] = useState(false);
 
   // Auto mode
-  const [autoMode,    setAutoMode]    = useState(false);
-  const [autoRepeats, setAutoRepeats] = useState("2");
-  const [autoBpm,     setAutoBpm]     = useState("60");
-  const [autoPhase,   setAutoPhase]   = useState(null); // null|'playing'|'silence'|'answer'|'answersilence'
-  const [autoRepeatN, setAutoRepeatN] = useState(0);    // which repeat we're on
+  const [autoMode,              setAutoMode]              = useState(false);
+  const [autoChordsBeforeTone,  setAutoChordsBeforeTone]  = useState("2"); // X: chords before tone
+  const [autoChordsAfterTone,   setAutoChordsAfterTone]   = useState("0"); // Y: chords after tone
+  const [autoCycleRepeats,      setAutoCycleRepeats]      = useState("1"); // Z: full cycle repeats
+  const [autoBpm,               setAutoBpm]               = useState("60");
+  const [autoPhase,             setAutoPhase]             = useState(null);
+  const [autoStatus,            setAutoStatus]            = useState(""); // human-readable status
   const autoTimerRef = useRef(null);
 
   // Round state
@@ -355,67 +357,89 @@ export default function EarTrainer() {
   };
 
   // ── Auto mode ────────────────────────────────────────────────
-  // Sequence per round:
-  //   repeat N times: [play 4 beats] → [silence 4 beats]
-  //   then: [reveal answer / play target note 4 beats] → [silence 4 beats] → next round
+  // Per cycle: [chord × X, 4 beats on/off each] → [tone, 4 beats] → [chord × Y, 4 beats on/off each]
+  // Whole cycle repeats Z times, then moves to the next round.
 
   const stopAuto = useCallback(() => {
     clearTimeout(autoTimerRef.current);
     autoTimerRef.current = null;
     setAutoPhase(null);
-    setAutoRepeatN(0);
+    setAutoStatus("");
     stopSustain();
   }, [stopSustain]);
 
-  const runAutoSequence = useCallback((roundData, repeatsDone) => {
-    const beatMs     = (60 / Number(autoBpm)) * 1000;
-    const phaseMs    = beatMs * 4;
-    const totalReps  = Number(autoRepeats);
+  // Plays one chord slot: sound for phaseMs, then silence for phaseMs, then call next().
+  const autoChordSlot = useCallback((roundData, label, phaseMs, next) => {
+    setAutoPhase("playing");
+    setAutoStatus(label);
+    triggerPlayChord(roundData);
+    autoTimerRef.current = setTimeout(() => {
+      stopSustain();
+      setAutoPhase("silence");
+      autoTimerRef.current = setTimeout(next, phaseMs);
+    }, phaseMs);
+  }, [triggerPlayChord, stopSustain]);
 
-    if (repeatsDone < totalReps) {
-      // Play chord
-      setAutoPhase("playing");
-      setAutoRepeatN(repeatsDone + 1);
-      triggerPlayChord(roundData);
+  const runAutoSequence = useCallback((roundData, cyclesDone) => {
+    const beatMs      = (60 / Number(autoBpm)) * 1000;
+    const phaseMs     = beatMs * 4;
+    const X           = Number(autoChordsBeforeTone);
+    const Y           = Number(autoChordsAfterTone);
+    const Z           = Number(autoCycleRepeats);
 
-      // After 4 beats → silence phase
-      autoTimerRef.current = setTimeout(() => {
-        stopSustain();
-        setAutoPhase("silence");
+    // Build the flat sequence of steps for one cycle as an array of thunks,
+    // then chain them with setTimeout so each runs after the previous finishes.
+    // Steps: X chord slots → 1 tone → Y chord slots
+    // After Z cycles → next round.
 
-        // After 4 beats silence → next repeat or answer
-        autoTimerRef.current = setTimeout(() => {
-          runAutoSequence(roundData, repeatsDone + 1);
-        }, phaseMs);
-      }, phaseMs);
-
-    } else {
-      // All repeats done → reveal answer
-      setAutoPhase("answer");
-      setRevealed(true);
-      playNote(roundData.targetMidi, { duration: phaseMs / 1000, gain: 0.26 });
-
-      autoTimerRef.current = setTimeout(() => {
-        setAutoPhase("answersilence");
-
-        autoTimerRef.current = setTimeout(() => {
-          // Build and start the next round
-          const nextRound = buildRound();
-          if (!nextRound) { stopAuto(); return; }
-          setRound(nextRound);
-          setRevealed(false);
-          runAutoSequence(nextRound, 0);
-        }, phaseMs);
-      }, phaseMs);
+    function runChordSlots(count, label, afterAll) {
+      if (count === 0) { afterAll(); return; }
+      autoChordSlot(roundData, label, phaseMs, () => runChordSlots(count - 1, label, afterAll));
     }
-  }, [autoBpm, autoRepeats, triggerPlayChord, stopSustain, playNote, buildRound, stopAuto]);
+
+    function runCycle(cycleNum) {
+      if (cycleNum > Z) {
+        // All cycles done — move to next round
+        const nextRound = buildRound();
+        if (!nextRound) { stopAuto(); return; }
+        setRound(nextRound);
+        setRevealed(false);
+        runAutoSequence(nextRound, 1);
+        return;
+      }
+
+      const cycleLabel = Z > 1 ? ` (cycle ${cycleNum}/${Z})` : "";
+
+      // Step 1: X chords before tone
+      runChordSlots(X, `chord${cycleLabel}`, () => {
+        // Step 2: tone
+        setAutoPhase("answer");
+        setAutoStatus(`tone${cycleLabel}`);
+        setRevealed(true);
+        playNote(roundData.targetMidi, { duration: phaseMs / 1000, gain: 0.26 });
+
+        autoTimerRef.current = setTimeout(() => {
+          if (Y === 0) {
+            // No chords after tone — go straight to next cycle (or finish)
+            runCycle(cycleNum + 1);
+          } else {
+            // Step 3: Y chords after tone
+            runChordSlots(Y, `chord after tone${cycleLabel}`, () => {
+              runCycle(cycleNum + 1);
+            });
+          }
+        }, phaseMs);
+      });
+    }
+
+    runCycle(cyclesDone);
+  }, [autoBpm, autoChordsBeforeTone, autoChordsAfterTone, autoCycleRepeats,
+      autoChordSlot, playNote, buildRound, stopAuto]);
 
   const startAuto = useCallback(() => {
     if (!round) return;
-    setAutoPhase("playing");
-    setAutoRepeatN(0);
     setRevealed(false);
-    runAutoSequence(round, 0);
+    runAutoSequence(round, 1);
   }, [round, runAutoSequence]);
 
   // Stop auto when it's toggled off
@@ -437,7 +461,6 @@ export default function EarTrainer() {
     return "th";
   };
 
-  const autoPhaseLabel = { playing: "▸ sounding", silence: "— listening", answer: "♪ answer", answersilence: "— next up…" };
   const isAutoRunning  = autoPhase !== null;
 
   return (
@@ -522,19 +545,30 @@ export default function EarTrainer() {
           </div>
           {autoMode && (
             <div className="px-2.5 pb-2.5 border-t border-amber-900/30 pt-2.5">
-              <div className="grid grid-cols-2 gap-2 mb-2">
+              <div className="grid grid-cols-4 gap-2 mb-2">
                 <Select label="BPM" value={autoBpm} onChange={setAutoBpm}
                   options={[40,50,60,70,80,90,100,120].map((b) => ({ value: String(b), label: String(b) }))} />
-                <Select label="Chord repeats" value={autoRepeats} onChange={setAutoRepeats}
+                <Select label="Chords" value={autoChordsBeforeTone} onChange={setAutoChordsBeforeTone}
+                  options={[0,1,2,3,4,6,8].map((n) => ({ value: String(n), label: String(n) }))} />
+                <Select label="After tone" value={autoChordsAfterTone} onChange={setAutoChordsAfterTone}
+                  options={[0,1,2,3,4,6,8].map((n) => ({ value: String(n), label: String(n) }))} />
+                <Select label="Cycles" value={autoCycleRepeats} onChange={setAutoCycleRepeats}
                   options={[1,2,3,4,6,8].map((n) => ({ value: String(n), label: String(n) }))} />
               </div>
               <div className="text-[10px] text-amber-200/35 mb-2 leading-snug">
-                Plays chord {autoRepeats}× (4 beats on, 4 beats off), then sounds the answer note for 4 beats, then moves on.
+                {(() => {
+                  const X = Number(autoChordsBeforeTone), Y = Number(autoChordsAfterTone), Z = Number(autoCycleRepeats);
+                  const parts = [];
+                  if (X > 0) parts.push(`chord ×${X}`);
+                  parts.push("tone");
+                  if (Y > 0) parts.push(`chord ×${Y}`);
+                  return `[${parts.join(" → ")}] × ${Z} cycle${Z !== 1 ? "s" : ""}, then next chord. Each slot = 4 beats.`;
+                })()}
               </div>
               {isAutoRunning ? (
                 <div className="flex items-center gap-2">
                   <div className="flex-1 text-center py-1.5 rounded-lg bg-amber-950/40 border border-amber-800/30 text-xs text-amber-300">
-                    {autoPhaseLabel[autoPhase]} · rep {autoRepeatN}/{autoRepeats}
+                    {autoPhase === "playing" ? "▸" : autoPhase === "answer" ? "♪" : "—"} {autoStatus}
                   </div>
                   <button onClick={stopAuto}
                     className="px-3 py-1.5 rounded-lg border border-amber-900/40 text-amber-200/60 text-xs hover:bg-amber-900/20 transition-all">
