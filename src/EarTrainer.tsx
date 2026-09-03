@@ -139,10 +139,36 @@ function buildVoicedChord(degrees,rootMidi,style,rng){
 function useAudioEngine(){
   const ctxRef=useRef(null);
   const sustainVoicesRef=useRef([]);
+
   const getCtx=useCallback(()=>{
     if(!ctxRef.current) ctxRef.current=new(window.AudioContext||window.webkitAudioContext)();
-    if(ctxRef.current.state==="suspended") ctxRef.current.resume();
+    if(ctxRef.current.state==="suspended"||ctxRef.current.state==="interrupted")
+      ctxRef.current.resume();
     return ctxRef.current;
+  },[]);
+
+  // Resume the AudioContext on any user gesture after the tab is backgrounded,
+  // the phone sleeps, or iOS interrupts audio (e.g. a notification). Without this,
+  // returning to the app leaves the context suspended and no sound plays.
+  useEffect(()=>{
+    const resume=()=>{
+      if(ctxRef.current&&ctxRef.current.state!=="running") ctxRef.current.resume();
+    };
+    // visibilitychange fires when the user switches back to the tab
+    const onVisible=()=>{ if(document.visibilityState==="visible") resume(); };
+    document.addEventListener("visibilitychange",onVisible);
+    // Touch/click/key act as the user gesture iOS requires to resume audio
+    document.addEventListener("touchstart",resume,{passive:true});
+    document.addEventListener("touchend",resume,{passive:true});
+    document.addEventListener("click",resume);
+    document.addEventListener("keydown",resume);
+    return()=>{
+      document.removeEventListener("visibilitychange",onVisible);
+      document.removeEventListener("touchstart",resume);
+      document.removeEventListener("touchend",resume);
+      document.removeEventListener("click",resume);
+      document.removeEventListener("keydown",resume);
+    };
   },[]);
 
   const PARTIALS=[
@@ -746,16 +772,30 @@ function AbsolutePitchTab({audio}){
         </div>
 
         {/* Active-stage note grid */}
+        {answered&&(
+          <div className="text-[9px] uppercase tracking-[0.18em] text-amber-200/30 mb-2">
+            Tap any note to hear it
+          </div>
+        )}
         <div className="grid grid-cols-4 gap-2 mb-3">
           {activeNotes.map(n=>{
+            const octave=stage.multiOctave?(currentNote?.octave||4):4;
+            const midi=NOTE_NAMES.indexOf(n)+(octave+1)*12;
             const isCorrect=answered&&n===currentNote?.name;
             const isWrong=answered&&n!==currentNote?.name;
+            const isMyGuess=answered&&lastCorrect===false&&n===currentNote?.name;
+            // After answering: clicking plays that note for comparison
+            const handleClick=answered
+              ?()=>playNote(midi,{duration:1.5,gain:0.22})
+              :()=>handleGuess(n);
             return(
-              <button key={n} onClick={()=>handleGuess(n)} disabled={answered}
+              <button key={n} onClick={handleClick}
                 className={`py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
-                  isCorrect?"bg-green-600 text-white shadow-[0_0_12px_rgba(34,197,94,0.4)]":
-                  isWrong?"bg-red-900/40 text-red-300 border border-red-800/40":
-                  "bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:border-amber-500/50 hover:bg-amber-900/20 disabled:cursor-default"}`}>
+                  isCorrect
+                    ?"bg-green-600 text-white shadow-[0_0_12px_rgba(34,197,94,0.4)] hover:bg-green-500"
+                    :isWrong
+                      ?"bg-red-900/40 text-red-300 border border-red-800/40 hover:bg-red-900/60"
+                      :"bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:border-amber-500/50 hover:bg-amber-900/20"}`}>
                 {n}
               </button>
             );
