@@ -140,34 +140,49 @@ function useAudioEngine(){
   const ctxRef=useRef(null);
   const sustainVoicesRef=useRef([]);
 
-  const getCtx=useCallback(()=>{
-    if(!ctxRef.current) ctxRef.current=new(window.AudioContext||window.webkitAudioContext)();
-    if(ctxRef.current.state==="suspended"||ctxRef.current.state==="interrupted")
-      ctxRef.current.resume();
+  // Returns a guaranteed-running AudioContext.
+  // Awaiting this before scheduling any nodes is critical — resume() is async,
+  // so returning the context before it resolves means currentTime is still frozen
+  // and scheduled notes never play. This is the root cause of the wake-up failure.
+  const getCtx=useCallback(async()=>{
+    // If context is in a truly unrecoverable state (can happen on iOS after a long
+    // sleep or phone call), close and recreate it entirely.
+    if(ctxRef.current&&ctxRef.current.state==="closed"){
+      ctxRef.current=null;
+    }
+    if(!ctxRef.current){
+      ctxRef.current=new(window.AudioContext||window.webkitAudioContext)();
+    }
+    const ctx=ctxRef.current;
+    if(ctx.state==="suspended"||ctx.state==="interrupted"){
+      try{ await ctx.resume(); }
+      catch(e){
+        // Resume failed — recreate the context from scratch
+        try{ await ctx.close(); }catch{}
+        ctxRef.current=new(window.AudioContext||window.webkitAudioContext)();
+        await ctxRef.current.resume();
+      }
+    }
     return ctxRef.current;
   },[]);
 
-  // Resume the AudioContext on any user gesture after the tab is backgrounded,
-  // the phone sleeps, or iOS interrupts audio (e.g. a notification). Without this,
-  // returning to the app leaves the context suspended and no sound plays.
+  // Resume eagerly on any user interaction or visibility change so the context
+  // is already running by the time a play button is tapped.
   useEffect(()=>{
-    const resume=()=>{
-      if(ctxRef.current&&ctxRef.current.state!=="running") ctxRef.current.resume();
+    const resume=async()=>{
+      if(!ctxRef.current) return;
+      if(ctxRef.current.state!=="running"){
+        try{ await ctxRef.current.resume(); }catch{}
+      }
     };
-    // visibilitychange fires when the user switches back to the tab
     const onVisible=()=>{ if(document.visibilityState==="visible") resume(); };
     document.addEventListener("visibilitychange",onVisible);
-    // Touch/click/key act as the user gesture iOS requires to resume audio
     document.addEventListener("touchstart",resume,{passive:true});
-    document.addEventListener("touchend",resume,{passive:true});
     document.addEventListener("click",resume);
-    document.addEventListener("keydown",resume);
     return()=>{
       document.removeEventListener("visibilitychange",onVisible);
       document.removeEventListener("touchstart",resume);
-      document.removeEventListener("touchend",resume);
       document.removeEventListener("click",resume);
-      document.removeEventListener("keydown",resume);
     };
   },[]);
 
@@ -178,8 +193,8 @@ function useAudioEngine(){
     {ratio:3,type:"sine",level:0.05},
   ];
 
-  const playNote=useCallback((midi,{duration=1.4,delay=0,gain=0.22}={})=>{
-    const ctx=getCtx();
+  const playNote=useCallback(async(midi,{duration=1.4,delay=0,gain=0.22}={})=>{
+    const ctx=await getCtx();
     const startAt=ctx.currentTime+delay;
     const freq=freqFromMidi(midi);
     const master=ctx.createGain();
@@ -204,19 +219,23 @@ function useAudioEngine(){
     let t=0; midiNotes.forEach(midi=>{playNote(midi,{...opts,delay:t});t+=stagger;});
   },[playNote]);
 
-  const stopSustain=useCallback((fadeSeconds=0.25)=>{
-    const ctx=getCtx(); const now=ctx.currentTime;
+  const stopSustain=useCallback(async(fadeSeconds=0.25)=>{
+    if(!ctxRef.current) return;
+    const ctx=await getCtx();
+    const now=ctx.currentTime;
     sustainVoicesRef.current.forEach(({oscs,gainNode})=>{
       gainNode.gain.cancelScheduledValues(now);
       gainNode.gain.setValueAtTime(gainNode.gain.value,now);
       gainNode.gain.exponentialRampToValueAtTime(0.0001,now+fadeSeconds);
-      oscs.forEach(osc=>osc.stop(now+fadeSeconds+0.05));
+      oscs.forEach(osc=>{ try{osc.stop(now+fadeSeconds+0.05);}catch{} });
     });
     sustainVoicesRef.current=[];
   },[getCtx]);
 
-  const sustainChord=useCallback((midiNotes,{gain=0.18,stagger=0}={})=>{
-    const ctx=getCtx(); stopSustain(0.05); let t=0;
+  const sustainChord=useCallback(async(midiNotes,{gain=0.18,stagger=0}={})=>{
+    const ctx=await getCtx();
+    stopSustain(0.05);
+    let t=0;
     midiNotes.forEach(midi=>{
       const startAt=ctx.currentTime+t;
       const freq=freqFromMidi(midi);
