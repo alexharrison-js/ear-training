@@ -1,20 +1,20 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 
 /* ═══════════════════════════════════════════════════════════════
-   STORAGE HELPERS — localStorage with safe fallback
+   STORAGE HELPERS
    ═══════════════════════════════════════════════════════════════ */
 
 function lsGet(key, fallback) {
   try { const v = localStorage.getItem(key); return v !== null ? JSON.parse(v) : fallback; }
   catch { return fallback; }
 }
-function lsSet(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
-}
+function lsSet(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} }
 
-const LS_AP   = "ear_trainer_ap_v1";
-const LS_INT  = "ear_trainer_intervals_v1";
+const LS_AP    = "ear_trainer_ap_v1";
+const LS_INT   = "ear_trainer_intervals_v1";
 const LS_CHORD = "ear_trainer_chord_v1";
+const LS_TAB   = "ear_trainer_tab_v1";
+const LS_INST  = "ear_trainer_instrument_v1";
 
 /* ═══════════════════════════════════════════════════════════════
    THEORY ENGINE
@@ -64,48 +64,67 @@ const CHORD_TYPES = [
 
 const ALL_DEGREES = [1,2,"b3",3,4,"b5",5,"#5","bb7",6,"b7",7,"b9",9,"#9",11,"#11",13];
 
-/* ─── Absolute Pitch: note sets unlocked per stage ─────────────
-   Research-backed: start with max-contrast tritone pairs,
-   progressively fill in chromatically. Stage 7 adds octave
-   variation to force true chroma (not pitch-height) learning. */
 const AP_STAGES = [
-  { id:1, label:"Stage 1", notes:["C","F#"],                   desc:"Tritone pair — maximum contrast" },
-  { id:2, label:"Stage 2", notes:["C","F#","G","C#"],          desc:"+ another tritone pair" },
-  { id:3, label:"Stage 3", notes:["C","F#","G","C#","D","Ab"], desc:"+ diminished skeleton" },
-  { id:4, label:"Stage 4", notes:["C","F#","G","C#","D","Ab","E","Bb"], desc:"+ 4 more" },
-  { id:5, label:"Stage 5", notes:["C","F#","G","C#","D","Ab","E","Bb","A","Eb"], desc:"+ 2 more" },
-  { id:6, label:"Stage 6", notes:NOTE_NAMES.map(n=>n),         desc:"All 12 pitch classes" },
-  { id:7, label:"Stage 7", notes:NOTE_NAMES.map(n=>n),         desc:"All 12 — multiple octaves", multiOctave:true },
+  {id:1,label:"Stage 1",notes:["C","F#"],desc:"Tritone pair — maximum contrast"},
+  {id:2,label:"Stage 2",notes:["C","F#","G","C#"],desc:"+ another tritone pair"},
+  {id:3,label:"Stage 3",notes:["C","F#","G","C#","D","Ab"],desc:"+ diminished skeleton"},
+  {id:4,label:"Stage 4",notes:["C","F#","G","C#","D","Ab","E","Bb"],desc:"+ 4 more"},
+  {id:5,label:"Stage 5",notes:["C","F#","G","C#","D","Ab","E","Bb","A","Eb"],desc:"+ 2 more"},
+  {id:6,label:"Stage 6",notes:[...NOTE_NAMES],desc:"All 12 pitch classes"},
+  {id:7,label:"Stage 7",notes:[...NOTE_NAMES],desc:"All 12 — multiple octaves",multiOctave:true},
 ];
 
-/* ─── Intervals ────────────────────────────────────────────────
-   Name, semitones, classic mnemonic song, and a difficulty rank
-   for progressive unlocking. */
 const INTERVALS = [
-  { id:"m2",  semis:1,  label:"Minor 2nd",   short:"m2",  mnemonic:"Jaws theme",              dir:"both" },
-  { id:"M2",  semis:2,  label:"Major 2nd",   short:"M2",  mnemonic:"Happy Birthday",           dir:"both" },
-  { id:"m3",  semis:3,  label:"Minor 3rd",   short:"m3",  mnemonic:"Smoke on the Water",       dir:"both" },
-  { id:"M3",  semis:4,  label:"Major 3rd",   short:"M3",  mnemonic:"When the Saints Go Marching In", dir:"both" },
-  { id:"P4",  semis:5,  label:"Perfect 4th", short:"P4",  mnemonic:"Here Comes the Bride",     dir:"both" },
-  { id:"TT",  semis:6,  label:"Tritone",     short:"TT",  mnemonic:"The Simpsons theme",        dir:"both" },
-  { id:"P5",  semis:7,  label:"Perfect 5th", short:"P5",  mnemonic:"Twinkle Twinkle",           dir:"both" },
-  { id:"m6",  semis:8,  label:"Minor 6th",   short:"m6",  mnemonic:"The Entertainer",           dir:"both" },
-  { id:"M6",  semis:9,  label:"Major 6th",   short:"M6",  mnemonic:"My Bonnie Lies Over the Ocean", dir:"both" },
-  { id:"m7",  semis:10, label:"Minor 7th",   short:"m7",  mnemonic:"Somewhere (West Side Story)", dir:"both" },
-  { id:"M7",  semis:11, label:"Major 7th",   short:"M7",  mnemonic:"Take On Me",                dir:"both" },
-  { id:"P8",  semis:12, label:"Octave",      short:"P8",  mnemonic:"Somewhere Over the Rainbow", dir:"both" },
+  {id:"m2",semis:1,label:"Minor 2nd",short:"m2",mnemonic:"Jaws theme"},
+  {id:"M2",semis:2,label:"Major 2nd",short:"M2",mnemonic:"Happy Birthday"},
+  {id:"m3",semis:3,label:"Minor 3rd",short:"m3",mnemonic:"Smoke on the Water"},
+  {id:"M3",semis:4,label:"Major 3rd",short:"M3",mnemonic:"When the Saints Go Marching In"},
+  {id:"P4",semis:5,label:"Perfect 4th",short:"P4",mnemonic:"Here Comes the Bride"},
+  {id:"TT",semis:6,label:"Tritone",short:"TT",mnemonic:"The Simpsons theme"},
+  {id:"P5",semis:7,label:"Perfect 5th",short:"P5",mnemonic:"Twinkle Twinkle"},
+  {id:"m6",semis:8,label:"Minor 6th",short:"m6",mnemonic:"The Entertainer"},
+  {id:"M6",semis:9,label:"Major 6th",short:"M6",mnemonic:"My Bonnie Lies Over the Ocean"},
+  {id:"m7",semis:10,label:"Minor 7th",short:"m7",mnemonic:"Somewhere (West Side Story)"},
+  {id:"M7",semis:11,label:"Major 7th",short:"M7",mnemonic:"Take On Me"},
+  {id:"P8",semis:12,label:"Octave",short:"P8",mnemonic:"Somewhere Over the Rainbow"},
 ];
-
-// Suggested unlock order — start with the most perceptually distinct
 const INTERVAL_UNLOCK_ORDER = ["P5","P4","P8","M2","M3","m3","M6","m6","m7","m2","M7","TT"];
 
-/* ─── Helpers ─────────────────────────────────────────────────── */
+/* ─── Instruments — IDs must match the folder names in /samples/ ── */
+const INSTRUMENTS = [
+  {id:"acoustic_grand_piano",label:"Grand Piano"},
+  {id:"acoustic_guitar_nylon",label:"Nylon Guitar"},
+  {id:"acoustic_guitar_steel",label:"Steel Guitar"},
+  {id:"alto_sax",label:"Alto Sax"},
+  {id:"cello",label:"Cello"},
+  {id:"clarinet",label:"Clarinet"},
+  {id:"contrabass",label:"Contrabass"},
+  {id:"flute",label:"Flute"},
+  {id:"french_horn",label:"French Horn"},
+  {id:"oboe",label:"Oboe"},
+  {id:"trumpet",label:"Trumpet"},
+  {id:"tuba",label:"Tuba"},
+  {id:"violin",label:"Violin"},
+  {id:"xylophone",label:"Xylophone"},
+];
+
+// GitHub Pages serves from /<repo>/; Vite sets import.meta.env.BASE_URL automatically.
+// Fallback to '/' for local dev. Trailing slash stripped below.
+const BASE = (typeof import !== "undefined" && typeof import.meta !== "undefined")
+  ? (import.meta.env?.BASE_URL || "/").replace(/\/$/, "")
+  : "";
+
+// Soundfont files use flat names (Db not C#). Convert MIDI to that format.
+function midiToSampleName(midi) {
+  const FLAT_NAMES = ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"];
+  return `${FLAT_NAMES[midi % 12]}${Math.floor(midi / 12) - 1}`;
+}
+
 function midiFromRootAndDegree(rootMidi,degree){ return rootMidi+DEGREE_SEMITONES[degree]; }
 function noteNameFromMidi(midi){ return {name:NOTE_NAMES[((midi%12)+12)%12],octave:Math.floor(midi/12)-1}; }
 function freqFromMidi(midi){ return 440*Math.pow(2,(midi-69)/12); }
 function degreeLabel(d){ return String(d); }
 function randItem(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
-function shuffle(arr){ const a=[...arr]; for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
 
 function resolveChordAndDegree(chordFilter,degreeFilter,allowNonChordTones){
   let pool=chordFilter==="random"?CHORD_TYPES:CHORD_TYPES.filter(c=>c.id===chordFilter);
@@ -134,30 +153,25 @@ function buildVoicedChord(degrees,rootMidi,style,rng){
 
 /* ═══════════════════════════════════════════════════════════════
    AUDIO ENGINE
+   Sample-based with pitch-shifting fallback + async wake-up fix.
    ═══════════════════════════════════════════════════════════════ */
 
 function useAudioEngine(){
-  const ctxRef=useRef(null);
-  const sustainVoicesRef=useRef([]);
+  const ctxRef          = useRef(null);
+  const bufferCache     = useRef({});   // { "instrument_midi": AudioBuffer }
+  const sustainVoices   = useRef([]);
+  const [instrument, setInstrument] = useState(()=>lsGet(LS_INST,"acoustic_grand_piano"));
 
-  // Returns a guaranteed-running AudioContext.
-  // Awaiting this before scheduling any nodes is critical — resume() is async,
-  // so returning the context before it resolves means currentTime is still frozen
-  // and scheduled notes never play. This is the root cause of the wake-up failure.
-  const getCtx=useCallback(async()=>{
-    // If context is in a truly unrecoverable state (can happen on iOS after a long
-    // sleep or phone call), close and recreate it entirely.
-    if(ctxRef.current&&ctxRef.current.state==="closed"){
-      ctxRef.current=null;
-    }
-    if(!ctxRef.current){
-      ctxRef.current=new(window.AudioContext||window.webkitAudioContext)();
-    }
+  useEffect(()=>lsSet(LS_INST,instrument),[instrument]);
+
+  // --- Context management (async, with recreation fallback for iOS) ---
+  const getCtx = useCallback(async()=>{
+    if(ctxRef.current?.state==="closed") ctxRef.current=null;
+    if(!ctxRef.current) ctxRef.current=new(window.AudioContext||window.webkitAudioContext)();
     const ctx=ctxRef.current;
     if(ctx.state==="suspended"||ctx.state==="interrupted"){
       try{ await ctx.resume(); }
       catch(e){
-        // Resume failed — recreate the context from scratch
         try{ await ctx.close(); }catch{}
         ctxRef.current=new(window.AudioContext||window.webkitAudioContext)();
         await ctxRef.current.resume();
@@ -166,41 +180,62 @@ function useAudioEngine(){
     return ctxRef.current;
   },[]);
 
-  // Resume eagerly on any user interaction or visibility change so the context
-  // is already running by the time a play button is tapped.
+  // Resume eagerly on any user interaction (critical for iOS after sleep)
   useEffect(()=>{
     const resume=async()=>{
-      if(!ctxRef.current) return;
-      if(ctxRef.current.state!=="running"){
+      if(ctxRef.current&&ctxRef.current.state!=="running")
         try{ await ctxRef.current.resume(); }catch{}
-      }
     };
-    const onVisible=()=>{ if(document.visibilityState==="visible") resume(); };
-    document.addEventListener("visibilitychange",onVisible);
+    const onVis=()=>{ if(document.visibilityState==="visible") resume(); };
+    document.addEventListener("visibilitychange",onVis);
     document.addEventListener("touchstart",resume,{passive:true});
     document.addEventListener("click",resume);
     return()=>{
-      document.removeEventListener("visibilitychange",onVisible);
+      document.removeEventListener("visibilitychange",onVis);
       document.removeEventListener("touchstart",resume);
       document.removeEventListener("click",resume);
     };
   },[]);
 
-  const PARTIALS=[
-    {ratio:1,type:"sine",level:1.0},
-    {ratio:1,type:"triangle",level:0.35,detune:4},
-    {ratio:2,type:"sine",level:0.12},
-    {ratio:3,type:"sine",level:0.05},
-  ];
+  // --- Sample fetching with pitch-shift fallback ---
+  // Finds the nearest cached sample and pitch-shifts via playbackRate.
+  const getBuffer = useCallback(async(ctx, inst, targetMidi)=>{
+    const key=`${inst}_${targetMidi}`;
+    if(bufferCache.current[key]) return {buffer:bufferCache.current[key],detune:0};
 
-  const playNote=useCallback(async(midi,{duration=1.4,delay=0,gain=0.22}={})=>{
-    const ctx=await getCtx();
+    // Try exact note first, then scan ±12 semitones for a cached neighbour
+    const candidates=[0,-1,1,-2,2,-3,3,-4,4,-5,5,-6,6,-7,7,-8,8,-9,9,-10,10,-11,11,-12,12];
+    for(const offset of candidates){
+      const midi=targetMidi+offset;
+      const cacheKey=`${inst}_${midi}`;
+      if(offset!==0&&bufferCache.current[cacheKey])
+        return {buffer:bufferCache.current[cacheKey],detune:-offset*100};
+
+      if(offset===0){
+        const name=midiToSampleName(midi);
+        const url=`${BASE}/samples/${inst}-mp3/${name}.mp3`;
+        try{
+          const res=await fetch(url);
+          if(!res.ok) continue;
+          const ab=await res.arrayBuffer();
+          const buf=await ctx.decodeAudioData(ab);
+          bufferCache.current[cacheKey]=buf;
+          return {buffer:buf,detune:0};
+        }catch{ continue; }
+      }
+    }
+    return null; // truly no sample available
+  },[]);
+
+  // --- Synth fallback (used if no samples available at all) ---
+  const playSynth = useCallback((ctx,midi,{duration=1.4,delay=0,gain=0.22}={})=>{
     const startAt=ctx.currentTime+delay;
     const freq=freqFromMidi(midi);
     const master=ctx.createGain();
     master.gain.value=0;
     master.connect(ctx.destination);
-    PARTIALS.forEach(p=>{
+    [{ratio:1,type:"sine",level:1.0},{ratio:1,type:"triangle",level:0.35,detune:4},
+     {ratio:2,type:"sine",level:0.12},{ratio:3,type:"sine",level:0.05}].forEach(p=>{
       const osc=ctx.createOscillator();
       osc.type=p.type; osc.frequency.value=freq*p.ratio;
       if(p.detune) osc.detune.value=p.detune;
@@ -213,47 +248,81 @@ function useAudioEngine(){
     master.gain.exponentialRampToValueAtTime(gain*0.55,startAt+0.25);
     master.gain.setValueAtTime(gain*0.55,startAt+Math.max(0.25,duration-0.35));
     master.gain.exponentialRampToValueAtTime(0.0001,startAt+duration);
-  },[getCtx]);
+  },[]);
 
-  const playChord=useCallback((midiNotes,{stagger=0,...opts}={})=>{
+  // --- Main playNote ---
+  const playNote = useCallback(async(midi,{duration=1.4,delay=0,gain=0.22}={})=>{
+    const ctx=await getCtx();
+    const result=await getBuffer(ctx,instrument,midi);
+    if(!result){ playSynth(ctx,midi,{duration,delay,gain}); return; }
+
+    const {buffer,detune}=result;
+    const startAt=ctx.currentTime+delay;
+    const source=ctx.createBufferSource();
+    source.buffer=buffer;
+    if(detune) source.detune.value=detune;
+
+    const master=ctx.createGain();
+    master.gain.value=0;
+    source.connect(master);
+    master.connect(ctx.destination);
+
+    master.gain.setValueAtTime(0,startAt);
+    master.gain.linearRampToValueAtTime(gain,startAt+0.02);
+    master.gain.setValueAtTime(gain,startAt+Math.max(0.02,duration-0.3));
+    master.gain.exponentialRampToValueAtTime(0.0001,startAt+duration);
+
+    source.start(startAt);
+    source.stop(startAt+duration+0.1);
+  },[getCtx,getBuffer,instrument,playSynth]);
+
+  const playChord = useCallback((midiNotes,{stagger=0,...opts}={})=>{
     let t=0; midiNotes.forEach(midi=>{playNote(midi,{...opts,delay:t});t+=stagger;});
   },[playNote]);
 
-  const stopSustain=useCallback(async(fadeSeconds=0.25)=>{
+  const stopSustain = useCallback(async(fadeSeconds=0.25)=>{
     if(!ctxRef.current) return;
     const ctx=await getCtx();
     const now=ctx.currentTime;
-    sustainVoicesRef.current.forEach(({oscs,gainNode})=>{
-      gainNode.gain.cancelScheduledValues(now);
-      gainNode.gain.setValueAtTime(gainNode.gain.value,now);
-      gainNode.gain.exponentialRampToValueAtTime(0.0001,now+fadeSeconds);
-      oscs.forEach(osc=>{ try{osc.stop(now+fadeSeconds+0.05);}catch{} });
+    sustainVoices.current.forEach(({source,gainNode})=>{
+      try{
+        gainNode.gain.cancelScheduledValues(now);
+        gainNode.gain.setValueAtTime(gainNode.gain.value,now);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001,now+fadeSeconds);
+        source.stop(now+fadeSeconds+0.05);
+      }catch{}
     });
-    sustainVoicesRef.current=[];
+    sustainVoices.current=[];
   },[getCtx]);
 
-  const sustainChord=useCallback(async(midiNotes,{gain=0.18,stagger=0}={})=>{
+  const sustainChord = useCallback(async(midiNotes,{gain=0.18,stagger=0}={})=>{
     const ctx=await getCtx();
-    stopSustain(0.05);
+    await stopSustain(0.05);
     let t=0;
-    midiNotes.forEach(midi=>{
+    for(const midi of midiNotes){
+      const result=await getBuffer(ctx,instrument,midi);
       const startAt=ctx.currentTime+t;
-      const freq=freqFromMidi(midi);
-      const master=ctx.createGain(); master.gain.value=0; master.connect(ctx.destination);
-      const oscs=PARTIALS.map(p=>{
-        const osc=ctx.createOscillator(); osc.type=p.type; osc.frequency.value=freq*p.ratio;
-        if(p.detune) osc.detune.value=p.detune;
-        const g=ctx.createGain(); g.gain.value=p.level; osc.connect(g); g.connect(master);
-        osc.start(startAt); return osc;
-      });
-      master.gain.setValueAtTime(0,startAt);
-      master.gain.linearRampToValueAtTime(gain,startAt+0.02);
-      sustainVoicesRef.current.push({oscs,gainNode:master});
+      const master=ctx.createGain();
+      master.gain.value=0;
+      master.connect(ctx.destination);
+      if(result){
+        const source=ctx.createBufferSource();
+        source.buffer=result.buffer;
+        if(result.detune) source.detune.value=result.detune;
+        source.loop=false;
+        source.connect(master);
+        source.start(startAt);
+        master.gain.setValueAtTime(0,startAt);
+        master.gain.linearRampToValueAtTime(gain,startAt+0.02);
+        sustainVoices.current.push({source,gainNode:master});
+      } else {
+        playSynth(ctx,midi,{duration:6,delay:t,gain});
+      }
       t+=stagger;
-    });
-  },[getCtx,stopSustain]);
+    }
+  },[getCtx,getBuffer,instrument,stopSustain,playSynth]);
 
-  return {playNote,playChord,sustainChord,stopSustain};
+  return {playNote,playChord,sustainChord,stopSustain,instrument,setInstrument};
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -272,7 +341,6 @@ function Select({label,value,onChange,options}){
     </div>
   );
 }
-
 function Toggle({label,sub,checked,onChange}){
   return(
     <div className="flex items-center justify-between py-2 px-3">
@@ -287,7 +355,6 @@ function Toggle({label,sub,checked,onChange}){
     </div>
   );
 }
-
 function Checkbox({label,checked,onChange}){
   return(
     <label className="flex items-center gap-2 cursor-pointer select-none py-1" onClick={()=>onChange(!checked)}>
@@ -300,7 +367,6 @@ function Checkbox({label,checked,onChange}){
     </label>
   );
 }
-
 function ConfirmButton({label,confirmLabel="Are you sure?",onConfirm,className=""}){
   const [asking,setAsking]=useState(false);
   if(asking) return(
@@ -311,21 +377,19 @@ function ConfirmButton({label,confirmLabel="Are you sure?",onConfirm,className="
         className="px-2 py-1 rounded text-[10px] border border-amber-900/40 text-amber-200/50 hover:bg-amber-900/20">Cancel</button>
     </div>
   );
-  return<button onClick={()=>setAsking(true)} className={`text-[10px] text-amber-200/40 hover:text-amber-200/70 transition-colors ${className}`}>{label}</button>;
+  return <button onClick={()=>setAsking(true)} className={`text-[10px] text-amber-200/40 hover:text-amber-200/70 transition-colors ${className}`}>{label}</button>;
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TAB: CHORD TONES
+   TAB: CHORD TONES  (unchanged from last working build)
    ═══════════════════════════════════════════════════════════════ */
 
 function ChordToneTab({audio}){
   const {playNote,playChord,sustainChord,stopSustain}=audio;
-
   const DEFAULTS={rootName:"random",octave:3,voicingStyle:"random",mode:"ascending",
     sustain:false,hideNotes:false,chordFilter:"random",degreeFilter:"random",
-    allowNonChordTones:false,autoMode:false,autoChordsBeforeTone:"2",
-    autoChordsAfterTone:"0",autoCycleRepeats:"1",autoBpm:"60"};
-
+    allowNonChordTones:false,autoChordsBeforeTone:"2",autoChordsAfterTone:"0",
+    autoCycleRepeats:"1",autoBpm:"60"};
   const saved=useMemo(()=>lsGet(LS_CHORD,DEFAULTS),[]);
 
   const [rootName,setRootName]=useState(saved.rootName);
@@ -345,18 +409,16 @@ function ChordToneTab({audio}){
   const [autoPhase,setAutoPhase]=useState(null);
   const [autoStatus,setAutoStatus]=useState("");
   const autoTimerRef=useRef(null);
-
   const [revealed,setRevealed]=useState(false);
   const [round,setRound]=useState(null);
   const [streak,setStreak]=useState(0);
   const [incompatible,setIncompatible]=useState(false);
   const [settingsOpen,setSettingsOpen]=useState(false);
 
-  // Persist prefs
   useEffect(()=>{
-    lsSet(LS_CHORD,{rootName,octave,voicingStyle,mode,sustain,hideNotes,
-      chordFilter,degreeFilter,allowNonChordTones,
-      autoChordsBeforeTone,autoChordsAfterTone,autoCycleRepeats,autoBpm});
+    lsSet(LS_CHORD,{rootName,octave,voicingStyle,mode,sustain,hideNotes,chordFilter,
+      degreeFilter,allowNonChordTones,autoChordsBeforeTone,autoChordsAfterTone,
+      autoCycleRepeats,autoBpm});
   },[rootName,octave,voicingStyle,mode,sustain,hideNotes,chordFilter,degreeFilter,
      allowNonChordTones,autoChordsBeforeTone,autoChordsAfterTone,autoCycleRepeats,autoBpm]);
 
@@ -396,14 +458,17 @@ function ChordToneTab({audio}){
   const handleReveal=()=>{if(!round)return;stopSustain();setRevealed(true);playNote(round.targetMidi,{duration:1.6,gain:0.26});};
   const handleNext=(correct)=>{if(correct===true)setStreak(s=>s+1);if(correct===false)setStreak(0);newRound();};
 
-  // Auto mode
   const stopAuto=useCallback(()=>{
-    clearTimeout(autoTimerRef.current);autoTimerRef.current=null;setAutoPhase(null);setAutoStatus("");stopSustain();
+    clearTimeout(autoTimerRef.current);autoTimerRef.current=null;
+    setAutoPhase(null);setAutoStatus("");stopSustain();
   },[stopSustain]);
 
   const autoChordSlot=useCallback((roundData,label,phaseMs,next)=>{
     setAutoPhase("playing");setAutoStatus(label);triggerPlayChord(roundData);
-    autoTimerRef.current=setTimeout(()=>{stopSustain();setAutoPhase("silence");autoTimerRef.current=setTimeout(next,phaseMs);},phaseMs);
+    autoTimerRef.current=setTimeout(()=>{
+      stopSustain();setAutoPhase("silence");
+      autoTimerRef.current=setTimeout(next,phaseMs);
+    },phaseMs);
   },[triggerPlayChord,stopSustain]);
 
   const runAutoSequence=useCallback((roundData,cyclesDone)=>{
@@ -442,13 +507,13 @@ function ChordToneTab({audio}){
   const ordinalSuffix=(d)=>{
     const s=String(d);
     if(s.endsWith("11")||s.endsWith("12")||s.endsWith("13"))return"th";
-    if(s.endsWith("1"))return"st"; if(s.endsWith("2"))return"nd"; if(s.endsWith("3"))return"rd"; return"th";
+    if(s.endsWith("1"))return"st"; if(s.endsWith("2"))return"nd";
+    if(s.endsWith("3"))return"rd"; return"th";
   };
   const isAutoRunning=autoPhase!==null;
 
   return(
     <div className="space-y-2">
-      {/* Practice focus */}
       <div className="rounded-xl border border-amber-500/20 bg-amber-950/30 p-2.5">
         <div className="text-[9px] uppercase tracking-[0.22em] text-amber-400/55 mb-2">Practice focus</div>
         <div className="grid grid-cols-2 gap-2 mb-2">
@@ -461,12 +526,11 @@ function ChordToneTab({audio}){
         <Checkbox label="Allow non-chord tones" checked={allowNonChordTones} onChange={setAllowNonChordTones}/>
         {incompatible&&!allowNonChordTones&&(
           <div className="mt-1.5 text-[10px] text-amber-400/80 bg-amber-900/30 rounded px-2 py-1.5">
-            ⚠ {degreeLabel(degreeFilter)} not in that chord type. Enable non-chord tones or change filters.
+            ⚠ {degreeLabel(degreeFilter)} not in that chord type.
           </div>
         )}
       </div>
 
-      {/* Playback settings (collapsible) */}
       <div className="rounded-xl border border-amber-900/30 bg-[#1a1410] overflow-hidden">
         <button onClick={()=>setSettingsOpen(o=>!o)}
           className="w-full flex items-center justify-between px-3 py-2 text-amber-200/60 hover:text-amber-200/80 transition-colors">
@@ -484,7 +548,8 @@ function ChordToneTab({audio}){
             <div className="grid grid-cols-2 gap-2">
               <Select label="Voicing" value={voicingStyle} onChange={setVoicingStyle}
                 options={[{value:"random",label:"Random"},{value:"close",label:"Close"},
-                          {value:"inverted",label:"Inverted"},{value:"spread",label:"Spread"},{value:"drop2",label:"Drop 2"}]}/>
+                          {value:"inverted",label:"Inverted"},{value:"spread",label:"Spread"},
+                          {value:"drop2",label:"Drop 2"}]}/>
               <Select label="Playback" value={mode} onChange={setMode}
                 options={[{value:"ascending",label:"Arpeggio"},{value:"block",label:"Block"}]}/>
             </div>
@@ -496,7 +561,6 @@ function ChordToneTab({audio}){
         )}
       </div>
 
-      {/* Auto mode */}
       <div className="rounded-xl border border-amber-900/30 bg-[#1a1410] overflow-hidden">
         <div className="flex items-center justify-between px-3 py-2">
           <span className="text-[9px] uppercase tracking-[0.22em] text-amber-200/60">Auto mode</span>
@@ -524,8 +588,7 @@ function ChordToneTab({audio}){
                 <div className="flex-1 text-center py-1.5 rounded-lg bg-amber-950/40 border border-amber-800/30 text-xs text-amber-300">
                   {autoPhase==="playing"?"▸":autoPhase==="answer"?"♪":"—"} {autoStatus}
                 </div>
-                <button onClick={stopAuto}
-                  className="px-3 py-1.5 rounded-lg border border-amber-900/40 text-amber-200/60 text-xs hover:bg-amber-900/20">Stop</button>
+                <button onClick={stopAuto} className="px-3 py-1.5 rounded-lg border border-amber-900/40 text-amber-200/60 text-xs hover:bg-amber-900/20">Stop</button>
               </div>
             ):(
               <button onClick={startAuto} disabled={!round||incompatible}
@@ -537,7 +600,6 @@ function ChordToneTab({audio}){
         )}
       </div>
 
-      {/* Round card */}
       <div className="rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-4">
         <div className="text-center mb-3">
           <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45 mb-0.5">Now sounding</div>
@@ -552,8 +614,7 @@ function ChordToneTab({audio}){
               className="flex-1 py-2.5 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-xs hover:bg-amber-400 active:scale-[0.98] transition-all disabled:opacity-30">
               ▸ {sustain?"Play & hold":"Play chord"}
             </button>
-            {sustain&&<button onClick={()=>stopSustain()}
-              className="px-4 py-2.5 rounded-xl border border-amber-500/40 text-amber-200 text-xs font-semibold hover:bg-amber-500/10">■</button>}
+            {sustain&&<button onClick={()=>stopSustain()} className="px-4 py-2.5 rounded-xl border border-amber-500/40 text-amber-200 text-xs font-semibold hover:bg-amber-500/10">■</button>}
           </div>
         )}
         <div className="text-center mb-3">
@@ -587,10 +648,8 @@ function ChordToneTab({audio}){
             </div>
             {!isAutoRunning&&(
               <div className="flex gap-2 mt-3">
-                <button onClick={()=>handleNext(false)}
-                  className="flex-1 py-2 rounded-lg border border-amber-900/40 text-amber-200/55 text-xs hover:bg-amber-900/20">Missed it</button>
-                <button onClick={()=>handleNext(true)}
-                  className="flex-1 py-2 rounded-lg bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500">Got it →</button>
+                <button onClick={()=>handleNext(false)} className="flex-1 py-2 rounded-lg border border-amber-900/40 text-amber-200/55 text-xs hover:bg-amber-900/20">Missed it</button>
+                <button onClick={()=>handleNext(true)} className="flex-1 py-2 rounded-lg bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500">Got it →</button>
               </div>
             )}
           </div>
@@ -600,7 +659,6 @@ function ChordToneTab({audio}){
         )}
       </div>
 
-      {/* Streak */}
       <div className="flex items-center justify-center gap-1 pt-1">
         {Array.from({length:8}).map((_,i)=>(
           <div key={i} className={`h-0.5 w-3.5 rounded-full ${i<streak%8&&streak>0?"bg-amber-400":"bg-amber-900/50"}`}/>
@@ -613,36 +671,37 @@ function ChordToneTab({audio}){
 
 /* ═══════════════════════════════════════════════════════════════
    TAB: ABSOLUTE PITCH
+   Classic mode (fully intact) + Discrimination mode (Wong 2025)
    ═══════════════════════════════════════════════════════════════ */
 
 const AP_DEFAULT_PROGRESS={
-  stageId:1,
-  sessionCorrect:0,
-  sessionTotal:0,
-  noteStats:{},      // { "C": { correct:0, total:0 } }
-  masteredStages:[], // [1,2,...] — stages passed
+  stageId:1, sessionCorrect:0, sessionTotal:0,
+  noteStats:{}, masteredStages:[],
+};
+const AP_DISC_DEFAULT={
+  // Per-pitch stats for discrimination mode: { "C": {correct:0,total:0} }
+  pitchStats:{}, sessionCorrect:0, sessionTotal:0,
 };
 
 function AbsolutePitchTab({audio}){
-  const {playNote}=audio;
+  const {playNote,instrument,setInstrument}=audio;
+  const [apMode,setApMode]=useState("classic"); // "classic"|"discrimination"
 
+  /* ── Classic mode state ── */
   const [progress,setProgress]=useState(()=>lsGet(LS_AP,AP_DEFAULT_PROGRESS));
-  const [currentNote,setCurrentNote]=useState(null);   // { name, midi }
+  const [currentNote,setCurrentNote]=useState(null);
   const [answered,setAnswered]=useState(false);
-  const [lastCorrect,setLastCorrect]=useState(null);   // true|false|null
-  const [confirmReset,setConfirmReset]=useState(false);
+  const [lastCorrect,setLastCorrect]=useState(null);
   const [showProgress,setShowProgress]=useState(false);
-  const [jumpStage,setJumpStage]=useState(null);       // null or stage id to jump to
+  const [jumpStage,setJumpStage]=useState(false);
+
+  useEffect(()=>lsSet(LS_AP,progress),[progress]);
 
   const stage=AP_STAGES.find(s=>s.id===progress.stageId)||AP_STAGES[0];
-  const activeNotes=stage.notes; // note name strings active this stage
-
-  // Persist whenever progress changes
-  useEffect(()=>lsSet(LS_AP,progress),[progress]);
+  const activeNotes=stage.notes;
 
   const generateNote=useCallback(()=>{
     const noteName=randItem(activeNotes);
-    // In multi-octave stage, randomise octave 3-5; otherwise fix to octave 4
     const octave=stage.multiOctave?(3+Math.floor(Math.random()*3)):4;
     const midi=NOTE_NAMES.indexOf(noteName)+(octave+1)*12;
     setCurrentNote({name:noteName,midi,octave});
@@ -651,24 +710,16 @@ function AbsolutePitchTab({audio}){
 
   useEffect(()=>{generateNote();},[stage.id]);
 
-  const playCurrentNote=()=>{
-    if(!currentNote)return;
-    playNote(currentNote.midi,{duration:1.8,gain:0.24});
-  };
-
   const handleGuess=(guessName)=>{
     if(answered||!currentNote)return;
     const correct=guessName===currentNote.name;
     setAnswered(true);setLastCorrect(correct);
-
     setProgress(prev=>{
       const noteStats={...prev.noteStats};
       const ns=noteStats[currentNote.name]||{correct:0,total:0};
       noteStats[currentNote.name]={correct:ns.correct+(correct?1:0),total:ns.total+1};
       const sc=prev.sessionCorrect+(correct?1:0);
       const st=prev.sessionTotal+1;
-
-      // Check mastery: ≥90% over last 20 trials this stage, then unlock next stage
       let newStageId=prev.stageId;
       let masteredStages=[...prev.masteredStages];
       if(correct&&sc>=20&&(sc/st)>=0.9&&newStageId<AP_STAGES.length&&!masteredStages.includes(prev.stageId)){
@@ -677,210 +728,321 @@ function AbsolutePitchTab({audio}){
       }
       return{...prev,noteStats,sessionCorrect:sc,sessionTotal:st,stageId:newStageId,masteredStages};
     });
-
-    // Play the note again after guess so user re-hears the correct pitch
     setTimeout(()=>playNote(currentNote.midi,{duration:1.5,gain:0.22}),300);
   };
 
-  const handleNext=()=>generateNote();
-
-  const handleReset=()=>{
-    const fresh={...AP_DEFAULT_PROGRESS};
-    setProgress(fresh);setConfirmReset(false);generateNote();
-  };
-
+  const handleReset=()=>{setProgress({...AP_DEFAULT_PROGRESS});generateNote();};
   const handleJumpToStage=(id)=>{
     setProgress(prev=>({...prev,stageId:id,sessionCorrect:0,sessionTotal:0}));
-    setJumpStage(null);
+    setJumpStage(false);
   };
 
-  const accuracy=progress.sessionTotal>0
+  const classicAccuracy=progress.sessionTotal>0
     ?Math.round((progress.sessionCorrect/progress.sessionTotal)*100):null;
 
-  // Button grid: show all 12 notes always (so user can pick any), highlight active ones
-  const allNotesGrid=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  /* ── Discrimination mode state (Wong 2025) ── */
+  const [discProgress,setDiscProgress]=useState(()=>lsGet("ear_trainer_ap_disc_v1",AP_DISC_DEFAULT));
+  const [discFocusPitch,setDiscFocusPitch]=useState("F"); // Start on F per Wong 2025
+  const [discTrial,setDiscTrial]=useState(null); // {midi, isTarget, name}
+  const [discAnswered,setDiscAnswered]=useState(false);
+  const [discLastCorrect,setDiscLastCorrect]=useState(null);
+
+  useEffect(()=>lsSet("ear_trainer_ap_disc_v1",discProgress),[discProgress]);
+
+  // Generate a trial: 50% target pitch, 50% distractor ±1 or ±2 semitones
+  const generateDiscTrial=useCallback(()=>{
+    const baseMidi=NOTE_NAMES.indexOf(discFocusPitch)+5*12; // octave 4
+    const isTarget=Math.random()<0.5;
+    let midi;
+    if(isTarget){
+      midi=baseMidi;
+    } else {
+      // Tight distractors — the research used very close neighbours
+      const offsets=[-2,-1,1,2];
+      midi=baseMidi+randItem(offsets);
+    }
+    const name=NOTE_NAMES[((midi%12)+12)%12];
+    setDiscTrial({midi,isTarget,name});
+    setDiscAnswered(false);setDiscLastCorrect(null);
+  },[discFocusPitch]);
+
+  useEffect(()=>{
+    if(apMode==="discrimination") generateDiscTrial();
+  },[apMode,discFocusPitch]);
+
+  const handleDiscGuess=(userSaidTarget)=>{
+    if(discAnswered||!discTrial) return;
+    const correct=userSaidTarget===discTrial.isTarget;
+    setDiscAnswered(true);setDiscLastCorrect(correct);
+
+    // Always play the true target pitch after guessing so chroma reinforces
+    const baseMidi=NOTE_NAMES.indexOf(discFocusPitch)+5*12;
+    setTimeout(()=>playNote(baseMidi,{duration:1.5,gain:0.26}),350);
+
+    setDiscProgress(prev=>{
+      const ps={...prev.pitchStats};
+      const p=ps[discFocusPitch]||{correct:0,total:0};
+      ps[discFocusPitch]={correct:p.correct+(correct?1:0),total:p.total+1};
+      return{...prev,pitchStats:ps,
+        sessionCorrect:prev.sessionCorrect+(correct?1:0),
+        sessionTotal:prev.sessionTotal+1};
+    });
+  };
+
+  const discAccuracy=discProgress.sessionTotal>0
+    ?Math.round((discProgress.sessionCorrect/discProgress.sessionTotal)*100):null;
+  const discPitchAcc=discProgress.pitchStats[discFocusPitch];
+  const discPitchPct=discPitchAcc&&discPitchAcc.total>0
+    ?Math.round((discPitchAcc.correct/discPitchAcc.total)*100):null;
 
   return(
     <div className="space-y-3">
-      {/* Stage banner */}
-      <div className="rounded-xl border border-amber-500/20 bg-amber-950/30 p-3">
-        <div className="flex items-center justify-between mb-1">
-          <div>
-            <div className="text-[9px] uppercase tracking-[0.22em] text-amber-400/55">{stage.label}</div>
-            <div className="text-sm font-semibold text-amber-50">{stage.desc}</div>
-          </div>
-          <div className="text-right">
-            {accuracy!==null&&<div className="text-lg font-semibold text-amber-300">{accuracy}%</div>}
-            <div className="text-[10px] text-amber-200/35">{progress.sessionCorrect}/{progress.sessionTotal}</div>
-          </div>
+      {/* Mode + instrument selector */}
+      <div className="rounded-xl border border-amber-500/20 bg-amber-950/30 p-2.5 space-y-2">
+        <div className="grid grid-cols-2 gap-2">
+          <Select label="Training mode" value={apMode} onChange={setApMode}
+            options={[{value:"classic",label:"Multiple choice"},{value:"discrimination",label:"Discrimination (Wong)"}]}/>
+          <Select label="Instrument" value={instrument} onChange={setInstrument}
+            options={INSTRUMENTS.map(i=>({value:i.id,label:i.label}))}/>
         </div>
-
-        {/* Stage progress bar */}
-        <div className="flex gap-1 mt-2">
-          {AP_STAGES.map(s=>(
-            <div key={s.id} className={`h-1 flex-1 rounded-full transition-colors ${
-              s.id<progress.stageId?"bg-amber-400":
-              s.id===progress.stageId?"bg-amber-500/60":"bg-amber-900/40"}`}/>
-          ))}
-        </div>
-
-        <div className="flex gap-2 mt-2 flex-wrap">
-          <button onClick={()=>setShowProgress(p=>!p)}
-            className="text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors">
-            {showProgress?"Hide stats ▴":"Per-note stats ▾"}
-          </button>
-          <button onClick={()=>setJumpStage(j=>j?null:progress.stageId)}
-            className="text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors">
-            Jump to stage ↗
-          </button>
-          <ConfirmButton label="Restart training" confirmLabel="Yes, reset all progress"
-            onConfirm={handleReset} className="ml-auto"/>
-        </div>
-
-        {/* Jump to stage picker */}
-        {jumpStage!==null&&(
-          <div className="mt-2 p-2 rounded-lg bg-[#1a1410] border border-amber-900/40">
-            <div className="text-[10px] text-amber-200/50 mb-2">
-              Jump forward if you've already worked through earlier stages. Progress stats reset for the new stage.
+        {apMode==="discrimination"&&(
+          <div className="pt-2 border-t border-amber-900/30">
+            <Select label="Focus pitch" value={discFocusPitch} onChange={setDiscFocusPitch}
+              options={NOTE_NAMES.map(n=>({value:n,label:n}))}/>
+            <div className="text-[10px] text-amber-200/40 mt-1.5 leading-snug">
+              Hear a note. Judge if it's {discFocusPitch} or not. Tight distractors (±1–2 semitones)
+              build chroma identity without giving you a labelled set to triangulate from.
             </div>
-            <div className="grid grid-cols-4 gap-1">
-              {AP_STAGES.map(s=>(
-                <button key={s.id} onClick={()=>handleJumpToStage(s.id)}
-                  className={`py-1.5 rounded-lg text-[10px] font-medium transition-all ${
-                    s.id===progress.stageId
-                      ?"bg-amber-500 text-[#1a1208]"
-                      :"border border-amber-900/40 text-amber-200/60 hover:bg-amber-900/20"}`}>
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Per-note stats */}
-        {showProgress&&(
-          <div className="mt-2 grid grid-cols-6 gap-1">
-            {allNotesGrid.map(n=>{
-              const s=progress.noteStats[n];
-              const pct=s&&s.total>0?Math.round((s.correct/s.total)*100):null;
-              const isActive=activeNotes.includes(n);
-              return(
-                <div key={n} className={`rounded p-1 text-center ${isActive?"bg-amber-950/60 border border-amber-800/30":"opacity-30"}`}>
-                  <div className="text-[9px] font-semibold text-amber-200">{n}</div>
-                  <div className="text-[8px] text-amber-200/50">{pct!==null?`${pct}%`:"—"}</div>
-                </div>
-              );
-            })}
           </div>
         )}
       </div>
 
-      {/* Round card */}
-      <div className="rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-4 text-center">
-        <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45 mb-3">What note is this?</div>
-
-        <div className="flex justify-center gap-3 mb-4">
-          <button onClick={playCurrentNote}
-            className="py-3 px-6 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]">
-            ▸ Play note
-          </button>
-          {answered&&(
-            <button onClick={()=>playNote(currentNote.midi,{duration:1.8,gain:0.24})}
-              className="px-4 py-3 rounded-xl border border-amber-500/40 text-amber-300 text-sm hover:bg-amber-500/10">↺</button>
-          )}
-        </div>
-
-        {/* Active-stage note grid */}
-        {answered&&(
-          <div className="text-[9px] uppercase tracking-[0.18em] text-amber-200/30 mb-2">
-            Tap any note to hear it
+      {/* ── DISCRIMINATION MODE ── */}
+      {apMode==="discrimination"&&(
+        <div className="rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-4 text-center space-y-3">
+          <div className="flex justify-between text-[10px] text-amber-200/35 px-1">
+            <span>Session {discAccuracy!==null?`${discAccuracy}%`:"—"} ({discProgress.sessionCorrect}/{discProgress.sessionTotal})</span>
+            <span>{discFocusPitch}: {discPitchPct!==null?`${discPitchPct}%`:"—"} ({discPitchAcc?.total||0} trials)</span>
           </div>
-        )}
-        <div className="grid grid-cols-4 gap-2 mb-3">
-          {activeNotes.map(n=>{
-            const octave=stage.multiOctave?(currentNote?.octave||4):4;
-            const midi=NOTE_NAMES.indexOf(n)+(octave+1)*12;
-            const isCorrect=answered&&n===currentNote?.name;
-            const isWrong=answered&&n!==currentNote?.name;
-            const isMyGuess=answered&&lastCorrect===false&&n===currentNote?.name;
-            // After answering: clicking plays that note for comparison
-            const handleClick=answered
-              ?()=>playNote(midi,{duration:1.5,gain:0.22})
-              :()=>handleGuess(n);
-            return(
-              <button key={n} onClick={handleClick}
-                className={`py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
-                  isCorrect
-                    ?"bg-green-600 text-white shadow-[0_0_12px_rgba(34,197,94,0.4)] hover:bg-green-500"
-                    :isWrong
-                      ?"bg-red-900/40 text-red-300 border border-red-800/40 hover:bg-red-900/60"
-                      :"bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:border-amber-500/50 hover:bg-amber-900/20"}`}>
-                {n}
-              </button>
-            );
-          })}
-        </div>
 
-        {answered&&(
-          <div style={{animation:"fadeIn 0.25s ease-out"}}>
-            <div className={`text-sm font-semibold mb-3 ${lastCorrect?"text-green-400":"text-red-400"}`}>
-              {lastCorrect?"✓ Correct!":"✗ That was "+currentNote?.name}
-              {!lastCorrect&&<span className="text-[10px] text-amber-200/40 block mt-0.5">The note plays again — listen carefully</span>}
-            </div>
-            {accuracy!==null&&progress.sessionTotal>=5&&(
-              <div className="text-[10px] text-amber-200/40 mb-2">
-                Session: {accuracy}% over {progress.sessionTotal} trials
-                {accuracy>=90&&progress.sessionTotal>=20&&progress.stageId<AP_STAGES.length&&" · 🎉 Stage unlocking soon!"}
-              </div>
+          <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45">
+            Is this note a {discFocusPitch}?
+          </div>
+
+          <div className="flex justify-center gap-3">
+            <button onClick={()=>discTrial&&playNote(discTrial.midi,{duration:1.8,gain:0.26})}
+              className="py-3 px-8 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]">
+              ▸ Hear note
+            </button>
+            {discAnswered&&(
+              <button onClick={()=>discTrial&&playNote(discTrial.midi,{duration:1.8,gain:0.26})}
+                className="px-4 py-3 rounded-xl border border-amber-500/40 text-amber-300 text-sm hover:bg-amber-500/10">↺</button>
             )}
-            <button onClick={handleNext}
-              className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all">
-              Next note →
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <button onClick={()=>handleDiscGuess(true)} disabled={discAnswered}
+              className={`py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
+                discAnswered&&discTrial?.isTarget?"bg-green-600 text-white":
+                discAnswered&&!discTrial?.isTarget?"bg-red-900/40 text-red-300 border border-red-800/40":
+                "bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:bg-amber-900/20"}`}>
+              Yes, it's {discFocusPitch}
+            </button>
+            <button onClick={()=>handleDiscGuess(false)} disabled={discAnswered}
+              className={`py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
+                discAnswered&&!discTrial?.isTarget?"bg-green-600 text-white":
+                discAnswered&&discTrial?.isTarget?"bg-red-900/40 text-red-300 border border-red-800/40":
+                "bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:bg-amber-900/20"}`}>
+              No, different note
             </button>
           </div>
-        )}
-      </div>
 
-      <div className="text-[10px] text-amber-200/25 text-center leading-relaxed px-2">
-        Identify each note without context clues. Stages unlock at ≥90% over 20 trials.
-        Use "Jump to stage" if you've already done earlier work elsewhere.
-      </div>
+          {discAnswered&&(
+            <div style={{animation:"fadeIn 0.25s ease-out"}} className="space-y-2">
+              <div className={`text-sm font-semibold ${discLastCorrect?"text-green-400":"text-red-400"}`}>
+                {discLastCorrect?"✓ Correct!":"✗ Wrong"}
+              </div>
+              <div className="text-[10px] text-amber-200/45">
+                That was {discTrial?.name} · True {discFocusPitch} is playing now for comparison
+              </div>
+              <button onClick={generateDiscTrial}
+                className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all">
+                Next trial →
+              </button>
+            </div>
+          )}
+
+          <button onClick={()=>{setDiscProgress({...AP_DISC_DEFAULT});generateDiscTrial();}}
+            className="text-[10px] text-amber-200/25 hover:text-amber-200/50 transition-colors">
+            Reset discrimination stats
+          </button>
+        </div>
+      )}
+
+      {/* ── CLASSIC MODE ── */}
+      {apMode==="classic"&&(
+        <>
+          {/* Stage banner */}
+          <div className="rounded-xl border border-amber-500/20 bg-amber-950/30 p-3">
+            <div className="flex items-center justify-between mb-1">
+              <div>
+                <div className="text-[9px] uppercase tracking-[0.22em] text-amber-400/55">{stage.label}</div>
+                <div className="text-sm font-semibold text-amber-50">{stage.desc}</div>
+              </div>
+              <div className="text-right">
+                {classicAccuracy!==null&&<div className="text-lg font-semibold text-amber-300">{classicAccuracy}%</div>}
+                <div className="text-[10px] text-amber-200/35">{progress.sessionCorrect}/{progress.sessionTotal}</div>
+              </div>
+            </div>
+            <div className="flex gap-1 mt-2">
+              {AP_STAGES.map(s=>(
+                <div key={s.id} className={`h-1 flex-1 rounded-full transition-colors ${
+                  s.id<progress.stageId?"bg-amber-400":
+                  s.id===progress.stageId?"bg-amber-500/60":"bg-amber-900/40"}`}/>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-2 flex-wrap">
+              <button onClick={()=>setShowProgress(p=>!p)}
+                className="text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors">
+                {showProgress?"Hide stats ▴":"Per-note stats ▾"}
+              </button>
+              <button onClick={()=>setJumpStage(j=>!j)}
+                className="text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors">
+                Jump to stage ↗
+              </button>
+              <ConfirmButton label="Restart training" confirmLabel="Yes, reset all progress"
+                onConfirm={handleReset} className="ml-auto"/>
+            </div>
+
+            {jumpStage&&(
+              <div className="mt-2 p-2 rounded-lg bg-[#1a1410] border border-amber-900/40">
+                <div className="text-[10px] text-amber-200/50 mb-2">
+                  Jump forward if you've worked through earlier stages elsewhere. Stats reset for the new stage.
+                </div>
+                <div className="grid grid-cols-4 gap-1">
+                  {AP_STAGES.map(s=>(
+                    <button key={s.id} onClick={()=>handleJumpToStage(s.id)}
+                      className={`py-1.5 rounded-lg text-[10px] font-medium transition-all ${
+                        s.id===progress.stageId?"bg-amber-500 text-[#1a1208]":
+                        "border border-amber-900/40 text-amber-200/60 hover:bg-amber-900/20"}`}>
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {showProgress&&(
+              <div className="mt-2 grid grid-cols-6 gap-1">
+                {NOTE_NAMES.map(n=>{
+                  const s=progress.noteStats[n];
+                  const pct=s&&s.total>0?Math.round((s.correct/s.total)*100):null;
+                  const isActive=activeNotes.includes(n);
+                  return(
+                    <div key={n} className={`rounded p-1 text-center ${isActive?"bg-amber-950/60 border border-amber-800/30":"opacity-30"}`}>
+                      <div className="text-[9px] font-semibold text-amber-200">{n}</div>
+                      <div className="text-[8px] text-amber-200/50">{pct!==null?`${pct}%`:"—"}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Round card */}
+          <div className="rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-4 text-center">
+            <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45 mb-3">What note is this?</div>
+            <div className="flex justify-center gap-3 mb-4">
+              <button onClick={()=>currentNote&&playNote(currentNote.midi,{duration:1.8,gain:0.24})}
+                className="py-3 px-6 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]">
+                ▸ Play note
+              </button>
+              {answered&&(
+                <button onClick={()=>currentNote&&playNote(currentNote.midi,{duration:1.8,gain:0.24})}
+                  className="px-4 py-3 rounded-xl border border-amber-500/40 text-amber-300 text-sm hover:bg-amber-500/10">↺</button>
+              )}
+            </div>
+
+            {answered&&(
+              <div className="text-[9px] uppercase tracking-[0.18em] text-amber-200/30 mb-2">
+                Tap any note to hear it
+              </div>
+            )}
+            <div className="grid grid-cols-4 gap-2 mb-3">
+              {activeNotes.map(n=>{
+                const octave=stage.multiOctave?(currentNote?.octave||4):4;
+                const midi=NOTE_NAMES.indexOf(n)+(octave+1)*12;
+                const isCorrect=answered&&n===currentNote?.name;
+                const isWrong=answered&&n!==currentNote?.name;
+                return(
+                  <button key={n}
+                    onClick={answered?()=>playNote(midi,{duration:1.5,gain:0.22}):()=>handleGuess(n)}
+                    className={`py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
+                      isCorrect?"bg-green-600 text-white shadow-[0_0_12px_rgba(34,197,94,0.4)] hover:bg-green-500":
+                      isWrong?"bg-red-900/40 text-red-300 border border-red-800/40 hover:bg-red-900/60":
+                      "bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:border-amber-500/50 hover:bg-amber-900/20"}`}>
+                    {n}
+                  </button>
+                );
+              })}
+            </div>
+
+            {answered&&(
+              <div style={{animation:"fadeIn 0.25s ease-out"}}>
+                <div className={`text-sm font-semibold mb-3 ${lastCorrect?"text-green-400":"text-red-400"}`}>
+                  {lastCorrect?"✓ Correct!":"✗ That was "+currentNote?.name}
+                  {!lastCorrect&&<span className="text-[10px] text-amber-200/40 block mt-0.5">Note plays again — listen carefully</span>}
+                </div>
+                {classicAccuracy!==null&&progress.sessionTotal>=5&&(
+                  <div className="text-[10px] text-amber-200/40 mb-2">
+                    {classicAccuracy}% over {progress.sessionTotal} trials
+                    {classicAccuracy>=90&&progress.sessionTotal>=20&&progress.stageId<AP_STAGES.length&&" · 🎉 Stage unlocking soon!"}
+                  </div>
+                )}
+                <button onClick={generateNote}
+                  className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all">
+                  Next note →
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="text-[10px] text-amber-200/25 text-center leading-relaxed px-2">
+            Stages unlock at ≥90% over 20 trials. Use "Jump to stage" if you've already worked through earlier stages elsewhere.
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TAB: INTERVALS
+   TAB: INTERVALS  (unchanged from last working build)
    ═══════════════════════════════════════════════════════════════ */
 
 const INT_DEFAULT_PROGRESS={
-  unlockedIntervals:["P5","P4","P8"], // start with the 3 most distinct
-  sessionCorrect:0,
-  sessionTotal:0,
-  intervalStats:{},  // { "P5": { asc:{c,t}, desc:{c,t} } }
+  unlockedIntervals:["P5","P4","P8"],
+  sessionCorrect:0,sessionTotal:0,intervalStats:{},
 };
 
 function IntervalsTab({audio}){
   const {playNote}=audio;
-
   const [progress,setProgress]=useState(()=>lsGet(LS_INT,INT_DEFAULT_PROGRESS));
-  const [direction,setDirection]=useState("both");   // "asc"|"desc"|"both"|"harmonic"
+  const [direction,setDirection]=useState("both");
   const [showMnemonics,setShowMnemonics]=useState(true);
   const [showProgress,setShowProgress]=useState(false);
-  const [round,setRound]=useState(null);   // {interval, rootMidi, topMidi, dir}
+  const [round,setRound]=useState(null);
   const [answered,setAnswered]=useState(false);
   const [lastCorrect,setLastCorrect]=useState(null);
 
   useEffect(()=>lsSet(LS_INT,progress),[progress]);
 
-  const activeIntervals=useMemo(()=>
-    INTERVALS.filter(i=>progress.unlockedIntervals.includes(i.id)),
-    [progress.unlockedIntervals]);
+  const activeIntervals=useMemo(()=>INTERVALS.filter(i=>progress.unlockedIntervals.includes(i.id)),[progress.unlockedIntervals]);
 
   const generateRound=useCallback(()=>{
-    if(activeIntervals.length===0)return;
+    if(activeIntervals.length===0) return;
     const interval=randItem(activeIntervals);
-    const rootMidi=48+Math.floor(Math.random()*13); // C3 to C4 range
+    const rootMidi=48+Math.floor(Math.random()*13);
     const actualDir=direction==="both"?(Math.random()>0.5?"asc":"desc")
       :direction==="harmonic"?"harmonic":direction;
     const topMidi=actualDir==="desc"?rootMidi-interval.semis:rootMidi+interval.semis;
@@ -891,13 +1053,10 @@ function IntervalsTab({audio}){
   useEffect(()=>{generateRound();},[progress.unlockedIntervals,direction]);
 
   const playRound=(r)=>{
-    const target=r||round; if(!target)return;
+    const target=r||round; if(!target) return;
     if(target.dir==="harmonic"){
       playNote(target.rootMidi,{duration:2,gain:0.2});
       playNote(target.topMidi,{duration:2,gain:0.2,delay:0.02});
-    } else if(target.dir==="desc"){
-      playNote(target.rootMidi,{duration:1.2,gain:0.22});
-      playNote(target.topMidi,{duration:1.2,gain:0.22,delay:0.8});
     } else {
       playNote(target.rootMidi,{duration:1.2,gain:0.22});
       playNote(target.topMidi,{duration:1.2,gain:0.22,delay:0.8});
@@ -905,10 +1064,9 @@ function IntervalsTab({audio}){
   };
 
   const handleGuess=(intervalId)=>{
-    if(answered||!round)return;
+    if(answered||!round) return;
     const correct=intervalId===round.interval.id;
     setAnswered(true);setLastCorrect(correct);
-
     setProgress(prev=>{
       const stats={...prev.intervalStats};
       const is=stats[round.interval.id]||{asc:{c:0,t:0},desc:{c:0,t:0},harmonic:{c:0,t:0}};
@@ -916,35 +1074,24 @@ function IntervalsTab({audio}){
       stats[round.interval.id]={...is,[dk]:{c:is[dk].c+(correct?1:0),t:is[dk].t+1}};
       const sc=prev.sessionCorrect+(correct?1:0);
       const st=prev.sessionTotal+1;
-
-      // Unlock next interval when ≥80% over 15 trials
       let unlocked=[...prev.unlockedIntervals];
-      if(correct&&sc>=15&&(sc/st)>=0.8){
+      if(correct&&sc>=15&&sc/st>=0.8){
         const nextId=INTERVAL_UNLOCK_ORDER.find(id=>!unlocked.includes(id));
         if(nextId) unlocked=[...unlocked,nextId];
       }
       return{...prev,intervalStats:stats,sessionCorrect:sc,sessionTotal:st,unlockedIntervals:unlocked};
     });
-
-    // Play the correct interval again
     setTimeout(()=>playRound(round),400);
   };
 
-  const handleReset=()=>{
-    const fresh={...INT_DEFAULT_PROGRESS};
-    setProgress(fresh);generateRound();
-  };
-
-  const handleUnlockInterval=(id)=>{
-    setProgress(prev=>({...prev,unlockedIntervals:[...new Set([...prev.unlockedIntervals,id])]}));
-  };
+  const handleReset=()=>{setProgress({...INT_DEFAULT_PROGRESS});generateRound();};
+  const handleUnlock=(id)=>setProgress(prev=>({...prev,unlockedIntervals:[...new Set([...prev.unlockedIntervals,id])]}));
 
   const accuracy=progress.sessionTotal>0?Math.round((progress.sessionCorrect/progress.sessionTotal)*100):null;
   const dirLabel={asc:"↑ Ascending",desc:"↓ Descending",harmonic:"Harmonic",both:"Both directions"};
 
   return(
     <div className="space-y-3">
-      {/* Controls */}
       <div className="rounded-xl border border-amber-500/20 bg-amber-950/30 p-2.5 space-y-2">
         <div className="text-[9px] uppercase tracking-[0.22em] text-amber-400/55 mb-1">Settings</div>
         <div className="grid grid-cols-2 gap-2">
@@ -958,20 +1105,16 @@ function IntervalsTab({audio}){
         </div>
         <Checkbox label="Show mnemonics" checked={showMnemonics} onChange={setShowMnemonics}/>
         <div className="flex gap-2 flex-wrap">
-          <button onClick={()=>setShowProgress(p=>!p)}
-            className="text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors">
+          <button onClick={()=>setShowProgress(p=>!p)} className="text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors">
             {showProgress?"Hide stats ▴":"Per-interval stats ▾"}
           </button>
-          <ConfirmButton label="Restart training" confirmLabel="Yes, reset"
-            onConfirm={handleReset} className="ml-auto"/>
+          <ConfirmButton label="Restart training" confirmLabel="Yes, reset" onConfirm={handleReset} className="ml-auto"/>
         </div>
-
-        {/* Per-interval stats + manual unlock */}
         {showProgress&&(
           <div className="space-y-1 mt-1">
             {INTERVALS.map(iv=>{
               const s=progress.intervalStats[iv.id];
-              const asc=s?.asc;const desc=s?.desc;
+              const asc=s?.asc,desc=s?.desc;
               const unlocked=progress.unlockedIntervals.includes(iv.id);
               return(
                 <div key={iv.id} className={`flex items-center gap-2 py-1 px-2 rounded-lg ${unlocked?"bg-amber-950/40":"opacity-40"}`}>
@@ -981,10 +1124,7 @@ function IntervalsTab({audio}){
                     ↑{asc?`${Math.round(asc.c/Math.max(asc.t,1)*100)}%`:"—"}{" "}
                     ↓{desc?`${Math.round(desc.c/Math.max(desc.t,1)*100)}%`:"—"}
                   </span>
-                  {!unlocked&&(
-                    <button onClick={()=>handleUnlockInterval(iv.id)}
-                      className="text-[9px] text-amber-500/60 hover:text-amber-400 transition-colors">unlock</button>
-                  )}
+                  {!unlocked&&<button onClick={()=>handleUnlock(iv.id)} className="text-[9px] text-amber-500/60 hover:text-amber-400 transition-colors">unlock</button>}
                 </div>
               );
             })}
@@ -992,7 +1132,6 @@ function IntervalsTab({audio}){
         )}
       </div>
 
-      {/* Session accuracy */}
       {accuracy!==null&&(
         <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-[#1a1410] border border-amber-900/30">
           <span className="text-[10px] text-amber-200/40">Session</span>
@@ -1000,25 +1139,19 @@ function IntervalsTab({audio}){
         </div>
       )}
 
-      {/* Round card */}
       {round&&(
         <div className="rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-4 text-center">
           <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45 mb-1">
             {dirLabel[round.dir]} interval — what is it?
           </div>
-
           <div className="flex justify-center gap-3 mb-4">
             <button onClick={()=>playRound(round)}
               className="py-3 px-6 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]">
               ▸ Play interval
             </button>
-            {answered&&(
-              <button onClick={()=>playRound(round)}
-                className="px-4 py-3 rounded-xl border border-amber-500/40 text-amber-300 text-sm hover:bg-amber-500/10">↺</button>
-            )}
+            {answered&&<button onClick={()=>playRound(round)}
+              className="px-4 py-3 rounded-xl border border-amber-500/40 text-amber-300 text-sm hover:bg-amber-500/10">↺</button>}
           </div>
-
-          {/* Answer grid */}
           <div className="grid grid-cols-3 gap-2 mb-3">
             {activeIntervals.map(iv=>{
               const isCorrect=answered&&iv.id===round.interval.id;
@@ -1035,17 +1168,12 @@ function IntervalsTab({audio}){
               );
             })}
           </div>
-
           {answered&&(
             <div style={{animation:"fadeIn 0.25s ease-out"}}>
               <div className={`text-sm font-semibold mb-1 ${lastCorrect?"text-green-400":"text-red-400"}`}>
                 {lastCorrect?"✓ Correct!":"✗ That was a "+round.interval.label}
               </div>
-              {showMnemonics&&(
-                <div className="text-[10px] text-amber-200/40 mb-3 italic">
-                  "{round.interval.mnemonic}"
-                </div>
-              )}
+              {showMnemonics&&<div className="text-[10px] text-amber-200/40 mb-3 italic">"{round.interval.mnemonic}"</div>}
               <button onClick={generateRound}
                 className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all">
                 Next interval →
@@ -1056,24 +1184,25 @@ function IntervalsTab({audio}){
       )}
 
       <div className="text-[10px] text-amber-200/25 text-center leading-relaxed px-2">
-        Ascending and descending are distinct skills — train both.
-        New intervals unlock at ≥80% over 15 trials. Use "unlock" in stats to jump ahead.
+        Ascending and descending are distinct skills. New intervals unlock at ≥80% over 15 trials.
       </div>
     </div>
   );
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ROOT APP — three-tab shell
+   ROOT APP
    ═══════════════════════════════════════════════════════════════ */
 
 export default function App(){
   const audio=useAudioEngine();
-  const [tab,setTab]=useState("chord");
+  const [tab,setTab]=useState(()=>lsGet(LS_TAB,"ap"));
+
+  useEffect(()=>lsSet(LS_TAB,tab),[tab]);
 
   const tabs=[
-    {id:"chord",  label:"Chord Tones"},
-    {id:"ap",     label:"Abs. Pitch"},
+    {id:"chord",label:"Chord Tones"},
+    {id:"ap",label:"Abs. Pitch"},
     {id:"intervals",label:"Intervals"},
   ];
 
@@ -1081,8 +1210,6 @@ export default function App(){
     <div className="min-h-screen w-full bg-[#120d0a] text-amber-50 flex flex-col items-center px-3 pt-3 pb-6"
       style={{fontFamily:"'Iowan Old Style',Georgia,serif"}}>
       <div className="w-full max-w-sm">
-
-        {/* Tab bar */}
         <div className="flex gap-1 mb-3 bg-[#1a1410] rounded-xl p-1 border border-amber-900/30">
           {tabs.map(t=>(
             <button key={t.id} onClick={()=>setTab(t.id)}
@@ -1092,15 +1219,11 @@ export default function App(){
             </button>
           ))}
         </div>
-
         {tab==="chord"&&<ChordToneTab audio={audio}/>}
         {tab==="ap"&&<AbsolutePitchTab audio={audio}/>}
         {tab==="intervals"&&<IntervalsTab audio={audio}/>}
       </div>
-
-      <style>{`
-        @keyframes fadeIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
-      `}</style>
+      <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}`}</style>
     </div>
   );
 }
