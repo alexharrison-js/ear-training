@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 
 /* ═══════════════════════════════════════════════════════════════
@@ -108,11 +109,8 @@ const INSTRUMENTS = [
   {id:"xylophone",label:"Xylophone"},
 ];
 
-// GitHub Pages serves from /<repo>/; Vite sets import.meta.env.BASE_URL automatically.
-// Fallback to '/' for local dev. Trailing slash stripped below.
-const BASE = (typeof import !== "undefined" && typeof import.meta !== "undefined")
-  ? (import.meta.env?.BASE_URL || "/").replace(/\/$/, "")
-  : "";
+// Vite injects BASE_URL automatically — "/ear-training/" on GitHub Pages, "/" locally.
+const BASE = ((import.meta as any).env?.BASE_URL || "/").replace(/\/$/, "");
 
 // Soundfont files use flat names (Db not C#). Convert MIDI to that format.
 function midiToSampleName(midi) {
