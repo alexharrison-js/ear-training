@@ -525,35 +525,49 @@ function useAudioEngine() {
 
   // --- Main playNote ---
   const playNote = useCallback(
-    async (midi, { duration = 1.4, delay = 0, gain = 0.22 } = {}) => {
+    async (midi) => {
       const ctx = await getCtx();
+
+      console.log("AudioContext:", ctx.state);
+
       const result = await getBuffer(ctx, instrument, midi);
+
       if (!result) {
-        playSynth(ctx, midi, { duration, delay, gain });
+        console.log("NO SAMPLE — using synth");
+        playSynth(ctx, midi);
         return;
       }
 
-      const { buffer, detune } = result;
-      const startAt = ctx.currentTime + delay;
+      console.log("SAMPLE FOUND:", {
+        instrument,
+        midi,
+        duration: result.buffer.duration,
+        sampleRate: result.buffer.sampleRate,
+        channels: result.buffer.numberOfChannels,
+      });
+
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+        console.log("AudioContext resumed:", ctx.state);
+      }
+
       const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      if (detune) source.detune.value = detune;
+      source.buffer = result.buffer;
 
-      const master = ctx.createGain();
-      master.gain.value = 0;
-      source.connect(master);
-      master.connect(ctx.destination);
+      if (result.detune) {
+        source.detune.value = result.detune;
+      }
 
-      master.gain.setValueAtTime(0, startAt);
-      master.gain.linearRampToValueAtTime(gain, startAt + 0.02);
-      master.gain.setValueAtTime(
-        gain,
-        startAt + Math.max(0.02, duration - 0.3),
-      );
-      master.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+      // IMPORTANT: bypass your gain envelope temporarily
+      source.connect(ctx.destination);
 
-      source.start(startAt);
-      source.stop(startAt + duration + 0.1);
+      console.log("STARTING SAMPLE");
+
+      source.start();
+
+      source.onended = () => {
+        console.log("SAMPLE ENDED");
+      };
     },
     [getCtx, getBuffer, instrument, playSynth],
   );
