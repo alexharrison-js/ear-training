@@ -26,10 +26,11 @@ function lsSet(key, value) {
 }
 
 const LS_AP = "ear_trainer_ap_v1";
+const LS_AP_SETS = "ear_trainer_ap_settings_v1";
 const LS_INT = "ear_trainer_intervals_v1";
 const LS_CHORD = "ear_trainer_chord_v1";
 const LS_TAB = "ear_trainer_tab_v1";
-const LS_INST = "ear_trainer_instrument_v1";
+const LS_AUDIO = "ear_trainer_audio_v1";
 
 /* ═══════════════════════════════════════════════════════════════
    THEORY ENGINE
@@ -177,7 +178,6 @@ const AP_STAGES = [
     label: "Stage 7",
     notes: [...NOTE_NAMES],
     desc: "All 12 — multiple octaves",
-    multiOctave: true,
   },
 ];
 
@@ -282,22 +282,22 @@ const INTERVAL_UNLOCK_ORDER = [
   "TT",
 ];
 
-/* ─── Instruments — IDs must match the folder names in /samples/ ── */
+/* ─── Instruments ─────────────────────────────────────────────── */
 const INSTRUMENTS = [
   { id: "accordion", label: "Accordion" },
   { id: "acoustic_grand_piano", label: "Grand Piano" },
   { id: "alto_sax", label: "Alto Sax" },
   { id: "baritone_sax", label: "Baritone Sax" },
   { id: "bassoon", label: "Bassoon" },
-  { id: "bright_acoustic_piano", label: "Bright Acoustic Piano" },
+  { id: "bright_acoustic_piano", label: "Bright Piano" },
   { id: "celesta", label: "Celesta" },
   { id: "cello", label: "Cello" },
   { id: "clarinet", label: "Clarinet" },
   { id: "dulcimer", label: "Dulcimer" },
-  { id: "electric_guitar_clean", label: "Clean Electric Guitar" },
-  { id: "electric_guitar_jazz", label: "Jazz Electric Guitar" },
-  { id: "electric_piano_1", label: "Electric Piano 1" },
-  { id: "electric_piano_2", label: "Electric Piano 2" },
+  { id: "electric_guitar_clean", label: "Clean Guitar" },
+  { id: "electric_guitar_jazz", label: "Jazz Guitar" },
+  { id: "electric_piano_1", label: "E. Piano 1" },
+  { id: "electric_piano_2", label: "E. Piano 2" },
   { id: "english_horn", label: "English Horn" },
   { id: "flute", label: "Flute" },
   { id: "french_horn", label: "French Horn" },
@@ -310,12 +310,26 @@ const INSTRUMENTS = [
   { id: "violin", label: "Violin" },
 ];
 
-// Vite injects BASE_URL automatically — "/ear-training/" on GitHub Pages, "/" locally.
+const ALL_OCTAVES = [2, 3, 4, 5, 6];
+
+const AUDIO_DEFAULTS = {
+  enabledInstruments: ["acoustic_grand_piano"],
+  randomizeInstruments: false,
+};
+
+const AP_SETTINGS_DEFAULTS = {
+  apMode: "classic",
+  discFocusPitch: "F",
+  enabledOctaves: [4],
+  customNotesEnabled: false,
+  customNotes: ["C", "F#"],
+  autoAdvance: false,
+};
+
 const BASE = ((import.meta as any).env?.BASE_URL || "/").replace(/\/$/, "");
 
-// Soundfont files use flat names (Db not C#). Convert MIDI to that format.
 function midiToSampleName(midi) {
-  const FLAT_NAMES = [
+  const FLAT = [
     "C",
     "Db",
     "D",
@@ -329,7 +343,7 @@ function midiToSampleName(midi) {
     "Bb",
     "B",
   ];
-  return `${FLAT_NAMES[midi % 12]}${Math.floor(midi / 12) - 1}`;
+  return `${FLAT[midi % 12]}${Math.floor(midi / 12) - 1}`;
 }
 
 function midiFromRootAndDegree(rootMidi, degree) {
@@ -393,21 +407,36 @@ function buildVoicedChord(degrees, rootMidi, style, rng) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   AUDIO ENGINE
-   Sample-based with pitch-shifting fallback + async wake-up fix.
+   AUDIO ENGINE  — sample-based, multi-instrument, async wake-up
    ═══════════════════════════════════════════════════════════════ */
 
 function useAudioEngine() {
   const ctxRef = useRef(null);
-  const bufferCache = useRef({}); // { "instrument_midi": AudioBuffer }
+  const bufferCache = useRef({});
   const sustainVoices = useRef([]);
-  const [instrument, setInstrument] = useState(() =>
-    lsGet(LS_INST, "acoustic_grand_piano"),
+
+  const [audioSettings, setAudioSettings] = useState(() =>
+    lsGet(LS_AUDIO, AUDIO_DEFAULTS),
+  );
+  useEffect(() => lsSet(LS_AUDIO, audioSettings), [audioSettings]);
+
+  const updateAudio = useCallback(
+    (patch) => setAudioSettings((p) => ({ ...p, ...patch })),
+    [],
   );
 
-  useEffect(() => lsSet(LS_INST, instrument), [instrument]);
+  const enabledInstruments = audioSettings.enabledInstruments?.length
+    ? audioSettings.enabledInstruments
+    : ["acoustic_grand_piano"];
+  const randomizeInstruments = audioSettings.randomizeInstruments;
 
-  // --- Context management (async, with recreation fallback for iOS) ---
+  const pickInstrument = useCallback(() => {
+    if (randomizeInstruments) return randItem(INSTRUMENTS).id;
+    if (enabledInstruments.length === 1) return enabledInstruments[0];
+    return randItem(enabledInstruments);
+  }, [randomizeInstruments, enabledInstruments]);
+
+  /* --- AudioContext management --- */
   const getCtx = useCallback(async () => {
     if (ctxRef.current?.state === "closed") ctxRef.current = null;
     if (!ctxRef.current)
@@ -429,7 +458,7 @@ function useAudioEngine() {
     return ctxRef.current;
   }, []);
 
-  // Resume eagerly on any user interaction (critical for iOS after sleep)
+  // Eager resume on any user gesture / tab visibility change (iOS wake-up fix)
   useEffect(() => {
     const resume = async () => {
       if (ctxRef.current && ctxRef.current.state !== "running")
@@ -450,43 +479,37 @@ function useAudioEngine() {
     };
   }, []);
 
-  // --- Sample fetching with pitch-shift fallback ---
-  // Finds the nearest cached sample and pitch-shifts via playbackRate.
+  /* --- Sample fetching with nearest-neighbour pitch-shift fallback --- */
   const getBuffer = useCallback(async (ctx, inst, targetMidi) => {
     const key = `${inst}_${targetMidi}`;
     if (bufferCache.current[key])
       return { buffer: bufferCache.current[key], detune: 0 };
-
-    // Try exact note first, then scan ±12 semitones for a cached neighbour
-    const candidates = [
+    const offsets = [
       0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6, -7, 7, -8, 8, -9, 9, -10, 10,
       -11, 11, -12, 12,
     ];
-    for (const offset of candidates) {
-      const midi = targetMidi + offset;
-      const cacheKey = `${inst}_${midi}`;
-      if (offset !== 0 && bufferCache.current[cacheKey])
-        return { buffer: bufferCache.current[cacheKey], detune: -offset * 100 };
-
-      if (offset === 0) {
-        const name = midiToSampleName(midi);
-        const url = `${BASE}/samples/${inst}-mp3/${name}.mp3`;
+    for (const off of offsets) {
+      const midi = targetMidi + off;
+      const ck = `${inst}_${midi}`;
+      if (off !== 0 && bufferCache.current[ck])
+        return { buffer: bufferCache.current[ck], detune: -off * 100 };
+      if (off === 0) {
+        const url = `${BASE}/samples/${inst}-mp3/${midiToSampleName(midi)}.mp3`;
         try {
           const res = await fetch(url);
           if (!res.ok) continue;
-          const ab = await res.arrayBuffer();
-          const buf = await ctx.decodeAudioData(ab);
-          bufferCache.current[cacheKey] = buf;
+          const buf = await ctx.decodeAudioData(await res.arrayBuffer());
+          bufferCache.current[ck] = buf;
           return { buffer: buf, detune: 0 };
         } catch {
           continue;
         }
       }
     }
-    return null; // truly no sample available
+    return null;
   }, []);
 
-  // --- Synth fallback (used if no samples available at all) ---
+  /* --- Synth fallback --- */
   const playSynth = useCallback(
     (ctx, midi, { duration = 1.4, delay = 0, gain = 0.22 } = {}) => {
       const startAt = ctx.currentTime + delay;
@@ -495,7 +518,7 @@ function useAudioEngine() {
       master.gain.value = 0;
       master.connect(ctx.destination);
       [
-        { ratio: 1, type: "sine", level: 1.0 },
+        { ratio: 1, type: "sine", level: 1 },
         { ratio: 1, type: "triangle", level: 0.35, detune: 4 },
         { ratio: 2, type: "sine", level: 0.12 },
         { ratio: 3, type: "sine", level: 0.05 },
@@ -523,53 +546,45 @@ function useAudioEngine() {
     [],
   );
 
-  // --- Main playNote ---
+  /* --- playNote: awaits context, picks instrument, falls back to synth --- */
   const playNote = useCallback(
-    async (midi) => {
+    async (
+      midi,
+      { duration = 1.4, delay = 0, gain = 0.22, inst = null } = {},
+    ) => {
       const ctx = await getCtx();
+      const instId = inst || pickInstrument();
+      const result = await getBuffer(ctx, instId, midi);
 
-      console.log("AudioContext:", ctx.state);
-
-      const result = await getBuffer(ctx, instrument, midi);
+      const startAt = ctx.currentTime + delay;
 
       if (!result) {
-        console.log("NO SAMPLE — using synth");
-        playSynth(ctx, midi);
+        playSynth(ctx, midi, { duration, delay, gain });
         return;
       }
 
-      console.log("SAMPLE FOUND:", {
-        instrument,
-        midi,
-        duration: result.buffer.duration,
-        sampleRate: result.buffer.sampleRate,
-        channels: result.buffer.numberOfChannels,
-      });
-
-      if (ctx.state === "suspended") {
-        await ctx.resume();
-        console.log("AudioContext resumed:", ctx.state);
-      }
-
+      const { buffer, detune } = result;
       const source = ctx.createBufferSource();
-      source.buffer = result.buffer;
+      source.buffer = buffer;
+      if (detune) source.detune.value = detune;
 
-      if (result.detune) {
-        source.detune.value = result.detune;
-      }
+      const master = ctx.createGain();
+      master.gain.value = 0;
+      source.connect(master);
+      master.connect(ctx.destination);
 
-      // IMPORTANT: bypass your gain envelope temporarily
-      source.connect(ctx.destination);
+      master.gain.setValueAtTime(0, startAt);
+      master.gain.linearRampToValueAtTime(gain, startAt + 0.02);
+      master.gain.setValueAtTime(
+        gain,
+        startAt + Math.max(0.02, duration - 0.3),
+      );
+      master.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
 
-      console.log("STARTING SAMPLE");
-
-      source.start();
-
-      source.onended = () => {
-        console.log("SAMPLE ENDED");
-      };
+      source.start(startAt);
+      source.stop(startAt + duration + 0.1);
     },
-    [getCtx, getBuffer, instrument, playSynth],
+    [getCtx, getBuffer, pickInstrument, playSynth],
   );
 
   const playChord = useCallback(
@@ -607,28 +622,29 @@ function useAudioEngine() {
       await stopSustain(0.05);
       let t = 0;
       for (const midi of midiNotes) {
-        const result = await getBuffer(ctx, instrument, midi);
+        const instId = pickInstrument();
+        const result = await getBuffer(ctx, instId, midi);
         const startAt = ctx.currentTime + t;
         const master = ctx.createGain();
         master.gain.value = 0;
         master.connect(ctx.destination);
         if (result) {
-          const source = ctx.createBufferSource();
-          source.buffer = result.buffer;
-          if (result.detune) source.detune.value = result.detune;
-          source.loop = false;
-          source.connect(master);
-          source.start(startAt);
+          const src = ctx.createBufferSource();
+          src.buffer = result.buffer;
+          if (result.detune) src.detune.value = result.detune;
+          src.loop = false;
+          src.connect(master);
+          src.start(startAt);
           master.gain.setValueAtTime(0, startAt);
           master.gain.linearRampToValueAtTime(gain, startAt + 0.02);
-          sustainVoices.current.push({ source, gainNode: master });
+          sustainVoices.current.push({ source: src, gainNode: master });
         } else {
           playSynth(ctx, midi, { duration: 6, delay: t, gain });
         }
         t += stagger;
       }
     },
-    [getCtx, getBuffer, instrument, stopSustain, playSynth],
+    [getCtx, getBuffer, pickInstrument, stopSustain, playSynth],
   );
 
   return {
@@ -636,8 +652,8 @@ function useAudioEngine() {
     playChord,
     sustainChord,
     stopSustain,
-    instrument,
-    setInstrument,
+    audioSettings,
+    updateAudio,
   };
 }
 
@@ -666,6 +682,7 @@ function Select({ label, value, onChange, options }) {
     </div>
   );
 }
+
 function Toggle({ label, sub, checked, onChange }) {
   return (
     <div className="flex items-center justify-between py-2 px-3">
@@ -686,14 +703,15 @@ function Toggle({ label, sub, checked, onChange }) {
     </div>
   );
 }
-function Checkbox({ label, checked, onChange }) {
+
+function Checkbox({ label, sub, checked, onChange }) {
   return (
     <label
-      className="flex items-center gap-2 cursor-pointer select-none py-1"
+      className="flex items-start gap-2 cursor-pointer select-none py-0.5"
       onClick={() => onChange(!checked)}
     >
       <span
-        className={`relative flex-shrink-0 w-3.5 h-3.5 rounded border transition-colors ${checked ? "bg-amber-500 border-amber-500" : "bg-transparent border-amber-700/60"}`}
+        className={`relative flex-shrink-0 w-3.5 h-3.5 mt-0.5 rounded border transition-colors ${checked ? "bg-amber-500 border-amber-500" : "bg-transparent border-amber-700/60"}`}
       >
         {checked && (
           <svg
@@ -711,10 +729,14 @@ function Checkbox({ label, checked, onChange }) {
           </svg>
         )}
       </span>
-      <span className="text-xs text-amber-100">{label}</span>
+      <div>
+        <span className="text-xs text-amber-100">{label}</span>
+        {sub && <div className="text-[10px] text-amber-200/35">{sub}</div>}
+      </div>
     </label>
   );
 }
+
 function ConfirmButton({
   label,
   confirmLabel = "Are you sure?",
@@ -730,7 +752,7 @@ function ConfirmButton({
             onConfirm();
             setAsking(false);
           }}
-          className="flex-1 py-1 rounded text-[10px] bg-red-900/50 text-red-300 hover:bg-red-900/70 transition-all"
+          className="flex-1 py-1 rounded text-[10px] bg-red-900/50 text-red-300 hover:bg-red-900/70"
         >
           {confirmLabel}
         </button>
@@ -752,12 +774,60 @@ function ConfirmButton({
   );
 }
 
+/* ─── Shared audio settings panel ──────────────────────────────── */
+function AudioSettingsPanel({ audioSettings, updateAudio }) {
+  const { enabledInstruments, randomizeInstruments } = audioSettings;
+  const toggle = (id) => {
+    if (randomizeInstruments) return;
+    const next = enabledInstruments.includes(id)
+      ? enabledInstruments.filter((i) => i !== id)
+      : [...enabledInstruments, id];
+    if (next.length === 0) return;
+    updateAudio({ enabledInstruments: next });
+  };
+  return (
+    <div className="space-y-2">
+      <Checkbox
+        label="Randomize from all instruments"
+        sub="Each note picks a random instrument"
+        checked={randomizeInstruments}
+        onChange={(v) => updateAudio({ randomizeInstruments: v })}
+      />
+      {!randomizeInstruments && (
+        <div className="pl-1">
+          <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/30 mb-1.5">
+            Active instruments
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0">
+            {INSTRUMENTS.map((inst) => (
+              <Checkbox
+                key={inst.id}
+                label={inst.label}
+                checked={enabledInstruments.includes(inst.id)}
+                onChange={() => toggle(inst.id)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════
-   TAB: CHORD TONES  (unchanged from last working build)
+   TAB: CHORD TONES
    ═══════════════════════════════════════════════════════════════ */
 
 function ChordToneTab({ audio }) {
-  const { playNote, playChord, sustainChord, stopSustain } = audio;
+  const {
+    playNote,
+    playChord,
+    sustainChord,
+    stopSustain,
+    audioSettings,
+    updateAudio,
+  } = audio;
+
   const DEFAULTS = {
     rootName: "random",
     octave: 3,
@@ -1092,7 +1162,7 @@ function ChordToneTab({ audio }) {
           <span className="text-amber-500/60">{settingsOpen ? "▴" : "▾"}</span>
         </button>
         {settingsOpen && (
-          <div className="px-2.5 pb-2.5 border-t border-amber-900/30 pt-2.5 space-y-2">
+          <div className="px-2.5 pb-2.5 border-t border-amber-900/30 pt-2.5 space-y-3">
             <div className="grid grid-cols-2 gap-2">
               <Select
                 label="Root"
@@ -1150,6 +1220,15 @@ function ChordToneTab({ audio }) {
                 sub="Chord type only · answer shows —"
                 checked={hideNotes}
                 onChange={setHideNotes}
+              />
+            </div>
+            <div className="border-t border-amber-900/30 pt-2">
+              <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35 mb-2">
+                Instrument
+              </div>
+              <AudioSettingsPanel
+                audioSettings={audioSettings}
+                updateAudio={updateAudio}
               />
             </div>
           </div>
@@ -1391,7 +1470,6 @@ function ChordToneTab({ audio }) {
 
 /* ═══════════════════════════════════════════════════════════════
    TAB: ABSOLUTE PITCH
-   Classic mode (fully intact) + Discrimination mode (Wong 2025)
    ═══════════════════════════════════════════════════════════════ */
 
 const AP_DEFAULT_PROGRESS = {
@@ -1401,85 +1479,147 @@ const AP_DEFAULT_PROGRESS = {
   noteStats: {},
   masteredStages: [],
 };
-const AP_DISC_DEFAULT = {
-  // Per-pitch stats for discrimination mode: { "C": {correct:0,total:0} }
-  pitchStats: {},
-  sessionCorrect: 0,
-  sessionTotal: 0,
-};
+const AP_DISC_DEFAULT = { pitchStats: {}, sessionCorrect: 0, sessionTotal: 0 };
 
 function AbsolutePitchTab({ audio }) {
-  const { playNote, instrument, setInstrument } = audio;
-  const [apMode, setApMode] = useState("classic"); // "classic"|"discrimination"
+  const { playNote, audioSettings, updateAudio } = audio;
 
-  /* ── Classic mode state ── */
+  // All AP settings in one persisted object
+  const [apSettings, setApSettings] = useState(() =>
+    lsGet(LS_AP_SETS, AP_SETTINGS_DEFAULTS),
+  );
+  useEffect(() => lsSet(LS_AP_SETS, apSettings), [apSettings]);
+  const patchAP = (patch) => setApSettings((p) => ({ ...p, ...patch }));
+
+  const apMode = apSettings.apMode;
+  const discFocusPitch = apSettings.discFocusPitch;
+  const enabledOctaves = apSettings.enabledOctaves?.length
+    ? apSettings.enabledOctaves
+    : [4];
+  const customNotesEnabled = apSettings.customNotesEnabled;
+  const customNotes = apSettings.customNotes?.length
+    ? apSettings.customNotes
+    : ["C", "F#"];
+  const autoAdvance = apSettings.autoAdvance;
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // --- Classic mode ---
   const [progress, setProgress] = useState(() =>
     lsGet(LS_AP, AP_DEFAULT_PROGRESS),
   );
+  useEffect(() => lsSet(LS_AP, progress), [progress]);
+
   const [currentNote, setCurrentNote] = useState(null);
   const [answered, setAnswered] = useState(false);
   const [lastCorrect, setLastCorrect] = useState(null);
-  const [showProgress, setShowProgress] = useState(false);
+  const [showNoteStats, setShowNoteStats] = useState(false);
   const [jumpStage, setJumpStage] = useState(false);
 
-  useEffect(() => lsSet(LS_AP, progress), [progress]);
+  const autoAdvanceTimer = useRef(null);
 
   const stage =
     AP_STAGES.find((s) => s.id === progress.stageId) || AP_STAGES[0];
-  const activeNotes = stage.notes;
+
+  // The pool of notes to draw from: custom if enabled, else stage notes
+  const activeNotes = customNotesEnabled ? customNotes : stage.notes;
+
+  // The buttons shown in the answer grid — custom if enabled, else stage notes
+  const answerNotes = customNotesEnabled ? customNotes : stage.notes;
+
+  const pickOctave = useCallback(
+    () => randItem(enabledOctaves),
+    [enabledOctaves],
+  );
 
   const generateNote = useCallback(() => {
+    if (activeNotes.length === 0) return;
+    clearTimeout(autoAdvanceTimer.current);
     const noteName = randItem(activeNotes);
-    const octave = stage.multiOctave ? 3 + Math.floor(Math.random() * 3) : 4;
+    const octave = pickOctave();
     const midi = NOTE_NAMES.indexOf(noteName) + (octave + 1) * 12;
     setCurrentNote({ name: noteName, midi, octave });
     setAnswered(false);
     setLastCorrect(null);
-  }, [activeNotes, stage]);
+  }, [activeNotes, pickOctave]);
+
+  // Auto-play the note shortly after generating it
+  const generateAndPlay = useCallback(() => {
+    if (activeNotes.length === 0) return;
+    clearTimeout(autoAdvanceTimer.current);
+    const noteName = randItem(activeNotes);
+    const octave = pickOctave();
+    const midi = NOTE_NAMES.indexOf(noteName) + (octave + 1) * 12;
+    setCurrentNote({ name: noteName, midi, octave });
+    setAnswered(false);
+    setLastCorrect(null);
+    // Small delay so state settles before audio fires
+    autoAdvanceTimer.current = setTimeout(
+      () => playNote(midi, { duration: 1.8, gain: 0.24 }),
+      80,
+    );
+  }, [activeNotes, pickOctave, playNote]);
 
   useEffect(() => {
     generateNote();
-  }, [stage.id]);
+  }, [
+    stage.id,
+    enabledOctaves.join(","),
+    customNotesEnabled,
+    customNotes.join(","),
+  ]);
+  useEffect(() => () => clearTimeout(autoAdvanceTimer.current), []);
 
   const handleGuess = (guessName) => {
     if (answered || !currentNote) return;
     const correct = guessName === currentNote.name;
     setAnswered(true);
     setLastCorrect(correct);
-    setProgress((prev) => {
-      const noteStats = { ...prev.noteStats };
-      const ns = noteStats[currentNote.name] || { correct: 0, total: 0 };
-      noteStats[currentNote.name] = {
-        correct: ns.correct + (correct ? 1 : 0),
-        total: ns.total + 1,
-      };
-      const sc = prev.sessionCorrect + (correct ? 1 : 0);
-      const st = prev.sessionTotal + 1;
-      let newStageId = prev.stageId;
-      let masteredStages = [...prev.masteredStages];
-      if (
-        correct &&
-        sc >= 20 &&
-        sc / st >= 0.9 &&
-        newStageId < AP_STAGES.length &&
-        !masteredStages.includes(prev.stageId)
-      ) {
-        masteredStages = [...masteredStages, prev.stageId];
-        newStageId = Math.min(prev.stageId + 1, AP_STAGES.length);
-      }
-      return {
-        ...prev,
-        noteStats,
-        sessionCorrect: sc,
-        sessionTotal: st,
-        stageId: newStageId,
-        masteredStages,
-      };
-    });
+
+    // Re-play the correct note after guess (always, for learning reinforcement)
     setTimeout(
       () => playNote(currentNote.midi, { duration: 1.5, gain: 0.22 }),
       300,
     );
+
+    // Update progress stats (only when in stage mode, not custom mode)
+    if (!customNotesEnabled) {
+      setProgress((prev) => {
+        const noteStats = { ...prev.noteStats };
+        const ns = noteStats[currentNote.name] || { correct: 0, total: 0 };
+        noteStats[currentNote.name] = {
+          correct: ns.correct + (correct ? 1 : 0),
+          total: ns.total + 1,
+        };
+        const sc = prev.sessionCorrect + (correct ? 1 : 0);
+        const st = prev.sessionTotal + 1;
+        let newStageId = prev.stageId;
+        let masteredStages = [...prev.masteredStages];
+        if (
+          correct &&
+          sc >= 20 &&
+          sc / st >= 0.9 &&
+          newStageId < AP_STAGES.length &&
+          !masteredStages.includes(prev.stageId)
+        ) {
+          masteredStages = [...masteredStages, prev.stageId];
+          newStageId = Math.min(prev.stageId + 1, AP_STAGES.length);
+        }
+        return {
+          ...prev,
+          noteStats,
+          sessionCorrect: sc,
+          sessionTotal: st,
+          stageId: newStageId,
+          masteredStages,
+        };
+      });
+    }
+
+    // Auto-advance: wait ~700ms after the re-play starts, then go to next note
+    if (autoAdvance) {
+      autoAdvanceTimer.current = setTimeout(() => generateAndPlay(), 1700);
+    }
   };
 
   const handleReset = () => {
@@ -1501,52 +1641,59 @@ function AbsolutePitchTab({ audio }) {
       ? Math.round((progress.sessionCorrect / progress.sessionTotal) * 100)
       : null;
 
-  /* ── Discrimination mode state (Wong 2025) ── */
+  const toggleCustomNote = (note) => {
+    const next = customNotes.includes(note)
+      ? customNotes.filter((n) => n !== note)
+      : [...customNotes, note];
+    if (next.length === 0) return;
+    patchAP({ customNotes: next });
+  };
+
+  const toggleOctave = (oct) => {
+    const next = enabledOctaves.includes(oct)
+      ? enabledOctaves.filter((o) => o !== oct)
+      : [...enabledOctaves, oct].sort();
+    if (next.length === 0) return;
+    patchAP({ enabledOctaves: next });
+  };
+
+  // --- Discrimination mode ---
   const [discProgress, setDiscProgress] = useState(() =>
     lsGet("ear_trainer_ap_disc_v1", AP_DISC_DEFAULT),
   );
-  const [discFocusPitch, setDiscFocusPitch] = useState("F"); // Start on F per Wong 2025
-  const [discTrial, setDiscTrial] = useState(null); // {midi, isTarget, name}
-  const [discAnswered, setDiscAnswered] = useState(false);
-  const [discLastCorrect, setDiscLastCorrect] = useState(null);
-
   useEffect(
     () => lsSet("ear_trainer_ap_disc_v1", discProgress),
     [discProgress],
   );
 
-  // Generate a trial: 50% target pitch, 50% distractor ±1 or ±2 semitones
+  const [discTrial, setDiscTrial] = useState(null);
+  const [discAnswered, setDiscAnswered] = useState(false);
+  const [discLastCorrect, setDiscLastCorrect] = useState(null);
+
   const generateDiscTrial = useCallback(() => {
-    const baseMidi = NOTE_NAMES.indexOf(discFocusPitch) + 5 * 12; // octave 4
+    const octave = pickOctave();
+    const baseMidi = NOTE_NAMES.indexOf(discFocusPitch) + (octave + 1) * 12;
     const isTarget = Math.random() < 0.5;
-    let midi;
-    if (isTarget) {
-      midi = baseMidi;
-    } else {
-      // Tight distractors — the research used very close neighbours
-      const offsets = [-2, -1, 1, 2];
-      midi = baseMidi + randItem(offsets);
-    }
+    const midi = isTarget ? baseMidi : baseMidi + randItem([-2, -1, 1, 2]);
     const name = NOTE_NAMES[((midi % 12) + 12) % 12];
-    setDiscTrial({ midi, isTarget, name });
+    setDiscTrial({ midi, isTarget, name, baseMidi });
     setDiscAnswered(false);
     setDiscLastCorrect(null);
-  }, [discFocusPitch]);
+  }, [discFocusPitch, pickOctave]);
 
   useEffect(() => {
     if (apMode === "discrimination") generateDiscTrial();
-  }, [apMode, discFocusPitch]);
+  }, [apMode, discFocusPitch, enabledOctaves.join(",")]);
 
   const handleDiscGuess = (userSaidTarget) => {
     if (discAnswered || !discTrial) return;
     const correct = userSaidTarget === discTrial.isTarget;
     setDiscAnswered(true);
     setDiscLastCorrect(correct);
-
-    // Always play the true target pitch after guessing so chroma reinforces
-    const baseMidi = NOTE_NAMES.indexOf(discFocusPitch) + 5 * 12;
-    setTimeout(() => playNote(baseMidi, { duration: 1.5, gain: 0.26 }), 350);
-
+    setTimeout(
+      () => playNote(discTrial.baseMidi, { duration: 1.5, gain: 0.26 }),
+      350,
+    );
     setDiscProgress((prev) => {
       const ps = { ...prev.pitchStats };
       const p = ps[discFocusPitch] || { correct: 0, total: 0 };
@@ -1571,44 +1718,215 @@ function AbsolutePitchTab({ audio }) {
       : null;
   const discPitchAcc = discProgress.pitchStats[discFocusPitch];
   const discPitchPct =
-    discPitchAcc && discPitchAcc.total > 0
+    discPitchAcc?.total > 0
       ? Math.round((discPitchAcc.correct / discPitchAcc.total) * 100)
       : null;
 
   return (
     <div className="space-y-3">
-      {/* Mode + instrument selector */}
-      <div className="rounded-xl border border-amber-500/20 bg-amber-950/30 p-2.5 space-y-2">
-        <div className="grid grid-cols-2 gap-2">
-          <Select
-            label="Training mode"
-            value={apMode}
-            onChange={setApMode}
-            options={[
-              { value: "classic", label: "Multiple choice" },
-              { value: "discrimination", label: "Discrimination (Wong)" },
-            ]}
-          />
-          <Select
-            label="Instrument"
-            value={instrument}
-            onChange={setInstrument}
-            options={INSTRUMENTS.map((i) => ({ value: i.id, label: i.label }))}
-          />
-        </div>
-        {apMode === "discrimination" && (
-          <div className="pt-2 border-t border-amber-900/30">
-            <Select
-              label="Focus pitch"
-              value={discFocusPitch}
-              onChange={setDiscFocusPitch}
-              options={NOTE_NAMES.map((n) => ({ value: n, label: n }))}
-            />
-            <div className="text-[10px] text-amber-200/40 mt-1.5 leading-snug">
-              Hear a note. Judge if it's {discFocusPitch} or not. Tight
-              distractors (±1–2 semitones) build chroma identity without giving
-              you a labelled set to triangulate from.
+      {/* ── SETTINGS PANEL ── */}
+      <div className="rounded-xl border border-amber-900/30 bg-[#1a1410] overflow-hidden">
+        <button
+          onClick={() => setSettingsOpen((o) => !o)}
+          className="w-full flex items-center justify-between px-3 py-2 text-amber-200/60 hover:text-amber-200/80 transition-colors"
+        >
+          <span className="text-[9px] uppercase tracking-[0.22em]">
+            AP settings
+          </span>
+          <span className="text-amber-500/60">{settingsOpen ? "▴" : "▾"}</span>
+        </button>
+
+        {settingsOpen && (
+          <div className="px-3 pb-3 border-t border-amber-900/30 pt-3 space-y-4">
+            {/* Training mode */}
+            <div className="space-y-2">
+              <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35">
+                Training mode
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { v: "classic", l: "Multiple choice" },
+                  { v: "discrimination", l: "Discrimination" },
+                ].map((o) => (
+                  <button
+                    key={o.v}
+                    onClick={() => patchAP({ apMode: o.v })}
+                    className={`py-2 rounded-lg text-xs font-medium transition-all ${
+                      apMode === o.v
+                        ? "bg-amber-500 text-[#1a1208]"
+                        : "border border-amber-900/40 text-amber-200/60 hover:bg-amber-900/20"
+                    }`}
+                  >
+                    {o.l}
+                  </button>
+                ))}
+              </div>
+              {apMode === "discrimination" && (
+                <Select
+                  label="Focus pitch"
+                  value={discFocusPitch}
+                  onChange={(v) => patchAP({ discFocusPitch: v })}
+                  options={NOTE_NAMES.map((n) => ({ value: n, label: n }))}
+                />
+              )}
             </div>
+
+            {/* Auto-advance toggle */}
+            <div className="border-t border-amber-900/30 pt-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-amber-100">Auto-advance</div>
+                  <div className="text-[10px] text-amber-200/35">
+                    Plays note, you guess, moves on automatically
+                  </div>
+                </div>
+                <button
+                  onClick={() => patchAP({ autoAdvance: !autoAdvance })}
+                  role="switch"
+                  aria-checked={autoAdvance}
+                  className={`relative flex-shrink-0 ml-3 w-9 h-5 rounded-full transition-colors duration-200 ${autoAdvance ? "bg-amber-500" : "bg-amber-900/50"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#120d0a] transition-transform duration-200 ${autoAdvance ? "translate-x-4" : "translate-x-0"}`}
+                  />
+                </button>
+              </div>
+              {autoAdvance && (
+                <div className="mt-1.5 text-[10px] text-amber-200/30 leading-snug">
+                  After you tap an answer, the note plays back then the next
+                  note starts automatically in ~1.7s.
+                </div>
+              )}
+            </div>
+
+            {/* Custom note selection */}
+            <div className="border-t border-amber-900/30 pt-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-amber-100">Custom note pool</div>
+                  <div className="text-[10px] text-amber-200/35">
+                    Override stage — practice any notes you choose
+                  </div>
+                </div>
+                <button
+                  onClick={() =>
+                    patchAP({ customNotesEnabled: !customNotesEnabled })
+                  }
+                  role="switch"
+                  aria-checked={customNotesEnabled}
+                  className={`relative flex-shrink-0 ml-3 w-9 h-5 rounded-full transition-colors duration-200 ${customNotesEnabled ? "bg-amber-500" : "bg-amber-900/50"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#120d0a] transition-transform duration-200 ${customNotesEnabled ? "translate-x-4" : "translate-x-0"}`}
+                  />
+                </button>
+              </div>
+              {customNotesEnabled && (
+                <div className="mt-1">
+                  <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/30 mb-2">
+                    Select notes to include
+                  </div>
+                  <div className="grid grid-cols-6 gap-1">
+                    {NOTE_NAMES.map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => toggleCustomNote(n)}
+                        className={`py-2 rounded-lg text-xs font-semibold transition-all ${
+                          customNotes.includes(n)
+                            ? "bg-amber-500 text-[#1a1208]"
+                            : "border border-amber-900/40 text-amber-200/50 hover:bg-amber-900/20"
+                        }`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-1.5 text-[10px] text-amber-200/25">
+                    {customNotes.length} note
+                    {customNotes.length !== 1 ? "s" : ""} selected · stage
+                    progress paused while custom is active
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Octave selection */}
+            <div className="border-t border-amber-900/30 pt-3 space-y-2">
+              <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35">
+                Octaves
+              </div>
+              <div className="text-[10px] text-amber-200/25 -mt-1">
+                Multiple octaves defeat pitch-height shortcuts. Start with one.
+              </div>
+              <div className="flex gap-1.5">
+                {ALL_OCTAVES.map((oct) => (
+                  <button
+                    key={oct}
+                    onClick={() => toggleOctave(oct)}
+                    className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${
+                      enabledOctaves.includes(oct)
+                        ? "bg-amber-500 text-[#1a1208]"
+                        : "border border-amber-900/40 text-amber-200/40 hover:bg-amber-900/20"
+                    }`}
+                  >
+                    {oct}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Instrument */}
+            <div className="border-t border-amber-900/30 pt-3 space-y-2">
+              <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35">
+                Instrument
+              </div>
+              <AudioSettingsPanel
+                audioSettings={audioSettings}
+                updateAudio={updateAudio}
+              />
+            </div>
+
+            {/* Stage jump + reset */}
+            {!customNotesEnabled && (
+              <div className="border-t border-amber-900/30 pt-3 space-y-2">
+                <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35">
+                  Progress
+                </div>
+                <button
+                  onClick={() => setJumpStage((j) => !j)}
+                  className="text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors"
+                >
+                  Jump to stage ↗
+                </button>
+                {jumpStage && (
+                  <div className="p-2 rounded-lg bg-[#120d0a] border border-amber-900/40">
+                    <div className="text-[10px] text-amber-200/40 mb-2">
+                      Stats reset for the new stage.
+                    </div>
+                    <div className="grid grid-cols-4 gap-1">
+                      {AP_STAGES.map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => handleJumpToStage(s.id)}
+                          className={`py-1.5 rounded-lg text-[10px] font-medium transition-all ${
+                            s.id === progress.stageId
+                              ? "bg-amber-500 text-[#1a1208]"
+                              : "border border-amber-900/40 text-amber-200/60 hover:bg-amber-900/20"
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <ConfirmButton
+                  label="Restart all AP training"
+                  confirmLabel="Yes, reset all progress"
+                  onConfirm={handleReset}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1624,14 +1942,12 @@ function AbsolutePitchTab({ audio }) {
             <span>
               {discFocusPitch}:{" "}
               {discPitchPct !== null ? `${discPitchPct}%` : "—"} (
-              {discPitchAcc?.total || 0} trials)
+              {discPitchAcc?.total || 0})
             </span>
           </div>
-
           <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45">
             Is this note a {discFocusPitch}?
           </div>
-
           <div className="flex justify-center gap-3">
             <button
               onClick={() =>
@@ -1654,36 +1970,29 @@ function AbsolutePitchTab({ audio }) {
               </button>
             )}
           </div>
-
           <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={() => handleDiscGuess(true)}
-              disabled={discAnswered}
-              className={`py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
-                discAnswered && discTrial?.isTarget
-                  ? "bg-green-600 text-white"
-                  : discAnswered && !discTrial?.isTarget
-                    ? "bg-red-900/40 text-red-300 border border-red-800/40"
-                    : "bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:bg-amber-900/20"
-              }`}
-            >
-              Yes, it's {discFocusPitch}
-            </button>
-            <button
-              onClick={() => handleDiscGuess(false)}
-              disabled={discAnswered}
-              className={`py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
-                discAnswered && !discTrial?.isTarget
-                  ? "bg-green-600 text-white"
-                  : discAnswered && discTrial?.isTarget
-                    ? "bg-red-900/40 text-red-300 border border-red-800/40"
-                    : "bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:bg-amber-900/20"
-              }`}
-            >
-              No, different note
-            </button>
+            {[
+              { v: true, l: `Yes — it's ${discFocusPitch}` },
+              { v: false, l: "No — different note" },
+            ].map((o) => (
+              <button
+                key={String(o.v)}
+                onClick={() => handleDiscGuess(o.v)}
+                disabled={discAnswered}
+                className={`py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
+                  discAnswered && discTrial?.isTarget === o.v
+                    ? discLastCorrect
+                      ? "bg-green-600 text-white"
+                      : "bg-red-900/40 text-red-300 border border-red-800/40"
+                    : discAnswered
+                      ? "bg-[#1a1410] border border-amber-900/30 text-amber-200/30"
+                      : "bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:bg-amber-900/20"
+                }`}
+              >
+                {o.l}
+              </button>
+            ))}
           </div>
-
           {discAnswered && (
             <div
               style={{ animation: "fadeIn 0.25s ease-out" }}
@@ -1695,8 +2004,8 @@ function AbsolutePitchTab({ audio }) {
                 {discLastCorrect ? "✓ Correct!" : "✗ Wrong"}
               </div>
               <div className="text-[10px] text-amber-200/45">
-                That was {discTrial?.name} · True {discFocusPitch} is playing
-                now for comparison
+                That was {discTrial?.name} · True {discFocusPitch} now playing
+                for comparison
               </div>
               <button
                 onClick={generateDiscTrial}
@@ -1706,7 +2015,6 @@ function AbsolutePitchTab({ audio }) {
               </button>
             </div>
           )}
-
           <button
             onClick={() => {
               setDiscProgress({ ...AP_DISC_DEFAULT });
@@ -1719,122 +2027,111 @@ function AbsolutePitchTab({ audio }) {
         </div>
       )}
 
-      {/* ── CLASSIC MODE ── */}
+      {/* ── CLASSIC / CUSTOM MODE ── */}
       {apMode === "classic" && (
         <>
-          {/* Stage banner */}
-          <div className="rounded-xl border border-amber-500/20 bg-amber-950/30 p-3">
-            <div className="flex items-center justify-between mb-1">
-              <div>
-                <div className="text-[9px] uppercase tracking-[0.22em] text-amber-400/55">
-                  {stage.label}
-                </div>
-                <div className="text-sm font-semibold text-amber-50">
-                  {stage.desc}
-                </div>
-              </div>
-              <div className="text-right">
-                {classicAccuracy !== null && (
-                  <div className="text-lg font-semibold text-amber-300">
-                    {classicAccuracy}%
+          {/* Stage banner — hidden in custom mode */}
+          {!customNotesEnabled && (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-950/30 p-3">
+              <div className="flex items-center justify-between mb-1">
+                <div>
+                  <div className="text-[9px] uppercase tracking-[0.22em] text-amber-400/55">
+                    {stage.label}
                   </div>
-                )}
-                <div className="text-[10px] text-amber-200/35">
-                  {progress.sessionCorrect}/{progress.sessionTotal}
+                  <div className="text-sm font-semibold text-amber-50">
+                    {stage.desc}
+                  </div>
                 </div>
-              </div>
-            </div>
-            <div className="flex gap-1 mt-2">
-              {AP_STAGES.map((s) => (
-                <div
-                  key={s.id}
-                  className={`h-1 flex-1 rounded-full transition-colors ${
-                    s.id < progress.stageId
-                      ? "bg-amber-400"
-                      : s.id === progress.stageId
-                        ? "bg-amber-500/60"
-                        : "bg-amber-900/40"
-                  }`}
-                />
-              ))}
-            </div>
-            <div className="flex gap-2 mt-2 flex-wrap">
-              <button
-                onClick={() => setShowProgress((p) => !p)}
-                className="text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors"
-              >
-                {showProgress ? "Hide stats ▴" : "Per-note stats ▾"}
-              </button>
-              <button
-                onClick={() => setJumpStage((j) => !j)}
-                className="text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors"
-              >
-                Jump to stage ↗
-              </button>
-              <ConfirmButton
-                label="Restart training"
-                confirmLabel="Yes, reset all progress"
-                onConfirm={handleReset}
-                className="ml-auto"
-              />
-            </div>
-
-            {jumpStage && (
-              <div className="mt-2 p-2 rounded-lg bg-[#1a1410] border border-amber-900/40">
-                <div className="text-[10px] text-amber-200/50 mb-2">
-                  Jump forward if you've worked through earlier stages
-                  elsewhere. Stats reset for the new stage.
-                </div>
-                <div className="grid grid-cols-4 gap-1">
-                  {AP_STAGES.map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => handleJumpToStage(s.id)}
-                      className={`py-1.5 rounded-lg text-[10px] font-medium transition-all ${
-                        s.id === progress.stageId
-                          ? "bg-amber-500 text-[#1a1208]"
-                          : "border border-amber-900/40 text-amber-200/60 hover:bg-amber-900/20"
-                      }`}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {showProgress && (
-              <div className="mt-2 grid grid-cols-6 gap-1">
-                {NOTE_NAMES.map((n) => {
-                  const s = progress.noteStats[n];
-                  const pct =
-                    s && s.total > 0
-                      ? Math.round((s.correct / s.total) * 100)
-                      : null;
-                  const isActive = activeNotes.includes(n);
-                  return (
-                    <div
-                      key={n}
-                      className={`rounded p-1 text-center ${isActive ? "bg-amber-950/60 border border-amber-800/30" : "opacity-30"}`}
-                    >
-                      <div className="text-[9px] font-semibold text-amber-200">
-                        {n}
-                      </div>
-                      <div className="text-[8px] text-amber-200/50">
-                        {pct !== null ? `${pct}%` : "—"}
-                      </div>
+                <div className="text-right">
+                  {classicAccuracy !== null && (
+                    <div className="text-lg font-semibold text-amber-300">
+                      {classicAccuracy}%
                     </div>
-                  );
-                })}
+                  )}
+                  <div className="text-[10px] text-amber-200/35">
+                    {progress.sessionCorrect}/{progress.sessionTotal}
+                  </div>
+                </div>
               </div>
-            )}
-          </div>
+              <div className="flex gap-1 mt-2">
+                {AP_STAGES.map((s) => (
+                  <div
+                    key={s.id}
+                    className={`h-1 flex-1 rounded-full transition-colors ${
+                      s.id < progress.stageId
+                        ? "bg-amber-400"
+                        : s.id === progress.stageId
+                          ? "bg-amber-500/60"
+                          : "bg-amber-900/40"
+                    }`}
+                  />
+                ))}
+              </div>
+              <button
+                onClick={() => setShowNoteStats((p) => !p)}
+                className="mt-2 text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors"
+              >
+                {showNoteStats ? "Hide per-note stats ▴" : "Per-note stats ▾"}
+              </button>
+              {showNoteStats && (
+                <div className="mt-2 grid grid-cols-6 gap-1">
+                  {NOTE_NAMES.map((n) => {
+                    const s = progress.noteStats[n];
+                    const pct =
+                      s?.total > 0
+                        ? Math.round((s.correct / s.total) * 100)
+                        : null;
+                    const isActive = activeNotes.includes(n);
+                    return (
+                      <div
+                        key={n}
+                        className={`rounded p-1 text-center ${isActive ? "bg-amber-950/60 border border-amber-800/30" : "opacity-30"}`}
+                      >
+                        <div className="text-[9px] font-semibold text-amber-200">
+                          {n}
+                        </div>
+                        <div className="text-[8px] text-amber-200/50">
+                          {pct !== null ? `${pct}%` : "—"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Custom mode banner */}
+          {customNotesEnabled && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 px-3 py-2 flex items-center gap-2">
+              <span className="text-amber-400 text-sm">✦</span>
+              <div>
+                <div className="text-xs font-semibold text-amber-300">
+                  Custom note pool active
+                </div>
+                <div className="text-[10px] text-amber-200/40">
+                  {customNotes.join(" · ")} · stage progress paused
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Round card */}
           <div className="rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-4 text-center">
-            <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45 mb-3">
+            <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45 mb-1">
               What note is this?
+              {enabledOctaves.length > 1 && (
+                <span className="ml-1 text-amber-200/25 normal-case tracking-normal">
+                  (multi-octave)
+                </span>
+              )}
+              {autoAdvance && (
+                <span className="ml-1 text-amber-500/50 normal-case tracking-normal">
+                  · auto
+                </span>
+              )}
             </div>
+
             <div className="flex justify-center gap-3 mb-4">
               <button
                 onClick={() =>
@@ -1858,15 +2155,21 @@ function AbsolutePitchTab({ audio }) {
               )}
             </div>
 
-            {answered && (
+            {answered && !autoAdvance && (
               <div className="text-[9px] uppercase tracking-[0.18em] text-amber-200/30 mb-2">
                 Tap any note to hear it
               </div>
             )}
+            {answered && autoAdvance && (
+              <div className="text-[10px] text-amber-200/30 mb-2">
+                Next note loading…
+              </div>
+            )}
+
             <div className="grid grid-cols-4 gap-2 mb-3">
-              {activeNotes.map((n) => {
-                const octave = stage.multiOctave ? currentNote?.octave || 4 : 4;
-                const midi = NOTE_NAMES.indexOf(n) + (octave + 1) * 12;
+              {answerNotes.map((n) => {
+                const midi =
+                  NOTE_NAMES.indexOf(n) + (currentNote?.octave ?? 4 + 1) * 12;
                 const isCorrect = answered && n === currentNote?.name;
                 const isWrong = answered && n !== currentNote?.name;
                 return (
@@ -1874,9 +2177,12 @@ function AbsolutePitchTab({ audio }) {
                     key={n}
                     onClick={
                       answered
-                        ? () => playNote(midi, { duration: 1.5, gain: 0.22 })
+                        ? autoAdvance
+                          ? undefined
+                          : () => playNote(midi, { duration: 1.5, gain: 0.22 })
                         : () => handleGuess(n)
                     }
+                    disabled={answered && autoAdvance}
                     className={`py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
                       isCorrect
                         ? "bg-green-600 text-white shadow-[0_0_12px_rgba(34,197,94,0.4)] hover:bg-green-500"
@@ -1891,7 +2197,7 @@ function AbsolutePitchTab({ audio }) {
               })}
             </div>
 
-            {answered && (
+            {answered && !autoAdvance && (
               <div style={{ animation: "fadeIn 0.25s ease-out" }}>
                 <div
                   className={`text-sm font-semibold mb-3 ${lastCorrect ? "text-green-400" : "text-red-400"}`}
@@ -1905,17 +2211,21 @@ function AbsolutePitchTab({ audio }) {
                     </span>
                   )}
                 </div>
-                {classicAccuracy !== null && progress.sessionTotal >= 5 && (
-                  <div className="text-[10px] text-amber-200/40 mb-2">
-                    {classicAccuracy}% over {progress.sessionTotal} trials
-                    {classicAccuracy >= 90 &&
-                      progress.sessionTotal >= 20 &&
-                      progress.stageId < AP_STAGES.length &&
-                      " · 🎉 Stage unlocking soon!"}
-                  </div>
-                )}
+                {!customNotesEnabled &&
+                  classicAccuracy !== null &&
+                  progress.sessionTotal >= 5 && (
+                    <div className="text-[10px] text-amber-200/40 mb-2">
+                      {classicAccuracy}% over {progress.sessionTotal} trials
+                      {classicAccuracy >= 90 &&
+                        progress.sessionTotal >= 20 &&
+                        progress.stageId < AP_STAGES.length &&
+                        " · 🎉 Stage unlocking soon!"}
+                    </div>
+                  )}
                 <button
-                  onClick={generateNote}
+                  onClick={() =>
+                    autoAdvance ? generateAndPlay() : generateNote()
+                  }
                   className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all"
                 >
                   Next note →
@@ -1925,8 +2235,9 @@ function AbsolutePitchTab({ audio }) {
           </div>
 
           <div className="text-[10px] text-amber-200/25 text-center leading-relaxed px-2">
-            Stages unlock at ≥90% over 20 trials. Use "Jump to stage" if you've
-            already worked through earlier stages elsewhere.
+            {customNotesEnabled
+              ? "Custom mode: open AP settings to change your note pool or return to stage training."
+              : "Stages unlock at ≥90% over 20 trials. Open AP settings to jump, change octaves, or build a custom note pool."}
           </div>
         </>
       )}
@@ -1935,7 +2246,7 @@ function AbsolutePitchTab({ audio }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TAB: INTERVALS  (unchanged from last working build)
+   TAB: INTERVALS
    ═══════════════════════════════════════════════════════════════ */
 
 const INT_DEFAULT_PROGRESS = {
@@ -1950,14 +2261,23 @@ function IntervalsTab({ audio }) {
   const [progress, setProgress] = useState(() =>
     lsGet(LS_INT, INT_DEFAULT_PROGRESS),
   );
-  const [direction, setDirection] = useState("both");
-  const [showMnemonics, setShowMnemonics] = useState(true);
+  const [direction, setDirection] = useState(() =>
+    lsGet("ear_trainer_int_dir", "both"),
+  );
+  const [showMnemonics, setShowMnemonics] = useState(() =>
+    lsGet("ear_trainer_int_mnem", true),
+  );
   const [showProgress, setShowProgress] = useState(false);
   const [round, setRound] = useState(null);
   const [answered, setAnswered] = useState(false);
   const [lastCorrect, setLastCorrect] = useState(null);
 
   useEffect(() => lsSet(LS_INT, progress), [progress]);
+  useEffect(() => lsSet("ear_trainer_int_dir", direction), [direction]);
+  useEffect(
+    () => lsSet("ear_trainer_int_mnem", showMnemonics),
+    [showMnemonics],
+  );
 
   const activeIntervals = useMemo(
     () => INTERVALS.filter((i) => progress.unlockedIntervals.includes(i.id)),
@@ -2052,7 +2372,6 @@ function IntervalsTab({ audio }) {
       ...prev,
       unlockedIntervals: [...new Set([...prev.unlockedIntervals, id])],
     }));
-
   const accuracy =
     progress.sessionTotal > 0
       ? Math.round((progress.sessionCorrect / progress.sessionTotal) * 100)
@@ -2233,7 +2552,6 @@ function IntervalsTab({ audio }) {
           )}
         </div>
       )}
-
       <div className="text-[10px] text-amber-200/25 text-center leading-relaxed px-2">
         Ascending and descending are distinct skills. New intervals unlock at
         ≥80% over 15 trials.
@@ -2249,7 +2567,6 @@ function IntervalsTab({ audio }) {
 export default function App() {
   const audio = useAudioEngine();
   const [tab, setTab] = useState(() => lsGet(LS_TAB, "ap"));
-
   useEffect(() => lsSet(LS_TAB, tab), [tab]);
 
   const tabs = [
