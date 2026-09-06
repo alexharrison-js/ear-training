@@ -67,21 +67,16 @@ const CHORD_TYPES = [
 const ALL_DEGREES = [1,2,"b3",3,4,"b5",5,"#5","bb7",6,"b7",7,"b9",9,"#9",11,"#11",13];
 
 const AP_STAGES = [
-  // Concert pitch notes listed. Stage order follows Wong 2019/2025 research:
-  // Start with F (Wong's anchor) + B (tritone, hard to contextualise in C major).
-  // Expand via semitone pairs to defeat relative pitch shortcuts.
-  // C is deliberately introduced late — experienced musicians have deep C-major
-  // fluency making C the easiest to fake with relative pitch.
   {id:1,label:"Stage 1",notes:["F","B"],
    desc:"F & B — tritone, maximum contrast. F is the Wong 2025 anchor."},
-  {id:2,label:"Stage 2",notes:["F","B","E","Bb"],
-   desc:"+ E & Bb — semitone neighbours. E→F and Bb→B defeat relative pitch."},
-  {id:3,label:"Stage 3",notes:["F","B","E","Bb","F#","C"],
+  {id:2,label:"Stage 2",notes:["F","B","E","A#"],
+   desc:"+ E & A# (Bb) — semitone neighbours. E→F and Bb→B defeat relative pitch."},
+  {id:3,label:"Stage 3",notes:["F","B","E","A#","F#","C"],
    desc:"+ F# & C — C introduced late to avoid C-major anchoring."},
-  {id:4,label:"Stage 4",notes:["F","B","E","Bb","F#","C","G#","D"],
+  {id:4,label:"Stage 4",notes:["F","B","E","A#","F#","C","G#","D"],
    desc:"+ G# & D"},
-  {id:5,label:"Stage 5",notes:["F","B","E","Bb","F#","C","G#","D","A","Eb"],
-   desc:"+ A & Eb"},
+  {id:5,label:"Stage 5",notes:["F","B","E","A#","F#","C","G#","D","A","D#"],
+   desc:"+ A & D# (Eb)"},
   {id:6,label:"Stage 6",notes:[...NOTE_NAMES],
    desc:"All 12 pitch classes"},
   {id:7,label:"Stage 7",notes:[...NOTE_NAMES],
@@ -160,10 +155,15 @@ const TRANSPOSITION_LABELS  = {
   Eb: "Eb instrument (alto/bari sax)",
 };
 
+// Normalize any enharmonic flat name to the sharp name used in NOTE_NAMES.
+const FLAT_TO_SHARP = {"Bb":"A#","Eb":"D#","Ab":"G#","Db":"C#","Gb":"F#","Cb":"B","Fb":"E"};
+function normalizeNote(n){ return FLAT_TO_SHARP[n] || n; }
+
 // Convert a concert-pitch note name to the displayed written name.
 function transposeLabel(concertName, offset) {
-  if(offset===0) return concertName;
-  const idx=(NOTE_NAMES.indexOf(concertName)+offset+12)%12;
+  if(offset===0) return normalizeNote(concertName);
+  const sharp = normalizeNote(concertName);
+  const idx = (NOTE_NAMES.indexOf(sharp) + offset + 12) % 12;
   return NOTE_NAMES[idx];
 }
 
