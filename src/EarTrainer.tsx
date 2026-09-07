@@ -132,6 +132,7 @@ const ALL_OCTAVES = [2,3,4,5,6];
 const AUDIO_DEFAULTS = {
   enabledInstruments: ["acoustic_grand_piano"],
   randomizeInstruments: false,
+  masterVolume: 1.0, // multiplier: 1.0 = normal, up to 3.0 for quiet samples
 };
 
 const AP_SETTINGS_DEFAULTS = {
@@ -141,7 +142,8 @@ const AP_SETTINGS_DEFAULTS = {
   customNotesEnabled: false,
   customNotes: ["F","B"],
   autoAdvance: false,
-  transposition: "C", // "C" = concert | "Bb" = tenor/soprano sax, trumpet, clarinet | "Eb" = alto/bari sax
+  playbackRepeat: false, // play note, wait 1s, play again, wait 1s, then advance
+  transposition: "C",
 };
 
 // How many semitones to shift a concert-pitch label upward for display.
@@ -222,6 +224,7 @@ function useAudioEngine(){
   const enabledInstruments = audioSettings.enabledInstruments?.length
     ? audioSettings.enabledInstruments : ["acoustic_grand_piano"];
   const randomizeInstruments = audioSettings.randomizeInstruments;
+  const masterVolume = audioSettings.masterVolume ?? 1.0;
 
   const pickInstrument = useCallback(()=>{
     if(randomizeInstruments) return randItem(INSTRUMENTS).id;
@@ -312,10 +315,11 @@ function useAudioEngine(){
     const ctx=await getCtx();
     const instId=inst||pickInstrument();
     const result=await getBuffer(ctx,instId,midi);
+    const amplifiedGain = Math.min(gain * masterVolume, 2.0); // cap at 2.0 to prevent clipping
 
     const startAt=ctx.currentTime+delay;
 
-    if(!result){ playSynth(ctx,midi,{duration,delay,gain}); return; }
+    if(!result){ playSynth(ctx,midi,{duration,delay,gain:amplifiedGain}); return; }
 
     const {buffer,detune}=result;
     const source=ctx.createBufferSource();
@@ -328,13 +332,13 @@ function useAudioEngine(){
     master.connect(ctx.destination);
 
     master.gain.setValueAtTime(0,startAt);
-    master.gain.linearRampToValueAtTime(gain,startAt+0.02);
-    master.gain.setValueAtTime(gain,startAt+Math.max(0.02,duration-0.3));
+    master.gain.linearRampToValueAtTime(amplifiedGain,startAt+0.02);
+    master.gain.setValueAtTime(amplifiedGain,startAt+Math.max(0.02,duration-0.3));
     master.gain.exponentialRampToValueAtTime(0.0001,startAt+duration);
 
     source.start(startAt);
     source.stop(startAt+duration+0.1);
-  },[getCtx,getBuffer,pickInstrument,playSynth]);
+  },[getCtx,getBuffer,pickInstrument,playSynth,masterVolume]);
 
   const playChord = useCallback((midiNotes,{stagger=0,...opts}={})=>{
     let t=0; midiNotes.forEach(midi=>{playNote(midi,{...opts,delay:t});t+=stagger;});
@@ -439,7 +443,7 @@ function ConfirmButton({label,confirmLabel="Are you sure?",onConfirm,className="
 
 /* ─── Shared audio settings panel ──────────────────────────────── */
 function AudioSettingsPanel({audioSettings,updateAudio}){
-  const {enabledInstruments,randomizeInstruments}=audioSettings;
+  const {enabledInstruments,randomizeInstruments,masterVolume=1.0}=audioSettings;
   const toggle=(id)=>{
     if(randomizeInstruments) return;
     const next=enabledInstruments.includes(id)
@@ -449,7 +453,22 @@ function AudioSettingsPanel({audioSettings,updateAudio}){
     updateAudio({enabledInstruments:next});
   };
   return(
-    <div className="space-y-2">
+    <div className="space-y-3">
+      {/* Volume */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35">Volume</span>
+          <span className="text-[10px] text-amber-300/60">{Math.round(masterVolume*100)}%</span>
+        </div>
+        <input type="range" min="0.5" max="3.0" step="0.1" value={masterVolume}
+          onChange={e=>updateAudio({masterVolume:Number(e.target.value)})}
+          className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+          style={{background:`linear-gradient(to right, rgb(245 158 11 / 0.8) ${((masterVolume-0.5)/2.5)*100}%, rgb(120 53 15 / 0.4) ${((masterVolume-0.5)/2.5)*100}%)`}}/>
+        <div className="flex justify-between text-[9px] text-amber-200/20 mt-0.5">
+          <span>50%</span><span>normal</span><span>300%</span>
+        </div>
+      </div>
+      {/* Instruments */}
       <Checkbox label="Randomize from all instruments" sub="Each note picks a random instrument"
         checked={randomizeInstruments} onChange={v=>updateAudio({randomizeInstruments:v})}/>
       {!randomizeInstruments&&(
@@ -783,6 +802,7 @@ function AbsolutePitchTab({audio}){
   const customNotesEnabled= apSettings.customNotesEnabled;
   const customNotes       = apSettings.customNotes?.length ? apSettings.customNotes : ["F","B"];
   const autoAdvance       = apSettings.autoAdvance;
+  const playbackRepeat    = apSettings.playbackRepeat;
   const transposition     = apSettings.transposition || "C";
   const txOffset          = TRANSPOSITION_OFFSETS[transposition] || 0;
 
@@ -798,6 +818,7 @@ function AbsolutePitchTab({audio}){
   const [currentNote,setCurrentNote]=useState(null);
   const [answered,setAnswered]=useState(false);
   const [lastCorrect,setLastCorrect]=useState(null);
+  const [userGuess,setUserGuess]=useState(null);
   const [showNoteStats,setShowNoteStats]=useState(false);
   const [jumpStage,setJumpStage]=useState(false);
 
@@ -820,10 +841,11 @@ function AbsolutePitchTab({audio}){
     const octave=pickOctave();
     const midi=NOTE_NAMES.indexOf(noteName)+(octave+1)*12;
     setCurrentNote({name:noteName,midi,octave});
-    setAnswered(false);setLastCorrect(null);
+    setAnswered(false);setLastCorrect(null);setUserGuess(null);
   },[activeNotes,pickOctave]);
 
-  // Auto-play the note shortly after generating it
+  // Auto-play the note. In playbackRepeat mode: play → 1s → play again → 1s → show buttons.
+  // In normal auto-advance: play once immediately, show buttons straight away.
   const generateAndPlay=useCallback(()=>{
     if(activeNotes.length===0) return;
     clearTimeout(autoAdvanceTimer.current);
@@ -831,10 +853,26 @@ function AbsolutePitchTab({audio}){
     const octave=pickOctave();
     const midi=NOTE_NAMES.indexOf(noteName)+(octave+1)*12;
     setCurrentNote({name:noteName,midi,octave});
-    setAnswered(false);setLastCorrect(null);
-    // Small delay so state settles before audio fires
-    autoAdvanceTimer.current=setTimeout(()=>playNote(midi,{duration:1.8,gain:0.24}),80);
-  },[activeNotes,pickOctave,playNote]);
+    setAnswered(false);setLastCorrect(null);setUserGuess(null);
+
+    if(playbackRepeat){
+      // First play
+      autoAdvanceTimer.current=setTimeout(()=>{
+        playNote(midi,{duration:1.0,gain:0.24});
+        // Second play after 1s
+        autoAdvanceTimer.current=setTimeout(()=>{
+          playNote(midi,{duration:1.0,gain:0.24});
+          // Buttons become active after another 1s
+          // (state is already set above — buttons are enabled immediately after
+          //  setAnswered(false) so user CAN tap early if they know it, but the
+          //  two plays give them time to sing/play along first)
+        },1000);
+      },80);
+    } else {
+      // Normal: play once, buttons already active
+      autoAdvanceTimer.current=setTimeout(()=>playNote(midi,{duration:1.8,gain:0.24}),80);
+    }
+  },[activeNotes,pickOctave,playNote,playbackRepeat]);
 
   useEffect(()=>{generateNote();},[stage.id,enabledOctaves.join(","),customNotesEnabled,customNotes.join(",")]);
   useEffect(()=>()=>clearTimeout(autoAdvanceTimer.current),[]);
@@ -842,12 +880,9 @@ function AbsolutePitchTab({audio}){
   const handleGuess=(guessName)=>{
     if(answered||!currentNote) return;
     const correct=guessName===currentNote.name;
-    setAnswered(true);setLastCorrect(correct);
+    setAnswered(true);setLastCorrect(correct);setUserGuess(guessName);
 
-    // Re-play the correct note after guess (always, for learning reinforcement)
-    setTimeout(()=>playNote(currentNote.midi,{duration:1.5,gain:0.22}),300);
-
-    // Update progress stats (only when in stage mode, not custom mode)
+    // Update progress stats (only in stage mode)
     if(!customNotesEnabled){
       setProgress(prev=>{
         const noteStats={...prev.noteStats};
@@ -865,9 +900,15 @@ function AbsolutePitchTab({audio}){
       });
     }
 
-    // Auto-advance: wait ~700ms after the re-play starts, then go to next note
     if(autoAdvance){
-      autoAdvanceTimer.current=setTimeout(()=>generateAndPlay(),1700);
+      if(correct){
+        // Correct: move instantly to the next note, no playback, no delay
+        generateAndPlay();
+      }
+      // Wrong: stay on this note, show error, let user tap buttons to compare — no auto-advance
+    } else {
+      // Manual mode: always re-play the note for reinforcement
+      setTimeout(()=>playNote(currentNote.midi,{duration:1.5,gain:0.22}),300);
     }
   };
 
@@ -996,20 +1037,34 @@ function AbsolutePitchTab({audio}){
             </div>
 
             {/* Auto-advance toggle */}
-            <div className="border-t border-amber-900/30 pt-3">
+            <div className="border-t border-amber-900/30 pt-3 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs text-amber-100">Auto-advance</div>
-                  <div className="text-[10px] text-amber-200/35">Plays note, you guess, moves on automatically</div>
+                  <div className="text-[10px] text-amber-200/35">Correct → instant next note · Wrong → shows error, you tap to continue</div>
                 </div>
                 <button onClick={()=>patchAP({autoAdvance:!autoAdvance})} role="switch" aria-checked={autoAdvance}
                   className={`relative flex-shrink-0 ml-3 w-9 h-5 rounded-full transition-colors duration-200 ${autoAdvance?"bg-amber-500":"bg-amber-900/50"}`}>
                   <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#120d0a] transition-transform duration-200 ${autoAdvance?"translate-x-4":"translate-x-0"}`}/>
                 </button>
               </div>
+
+              {/* Playback repeat — only visible when auto-advance is on */}
               {autoAdvance&&(
-                <div className="mt-1.5 text-[10px] text-amber-200/30 leading-snug">
-                  After you tap an answer, the note plays back then the next note starts automatically in ~1.7s.
+                <div className="pl-3 border-l-2 border-amber-900/40 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs text-amber-100">Play it back</div>
+                      <div className="text-[10px] text-amber-200/35">
+                        Plays note · 1s · plays again · 1s · then you answer.
+                        Gives you time to sing or play along before guessing.
+                      </div>
+                    </div>
+                    <button onClick={()=>patchAP({playbackRepeat:!playbackRepeat})} role="switch" aria-checked={playbackRepeat}
+                      className={`relative flex-shrink-0 ml-3 w-9 h-5 rounded-full transition-colors duration-200 ${playbackRepeat?"bg-amber-500":"bg-amber-900/50"}`}>
+                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#120d0a] transition-transform duration-200 ${playbackRepeat?"translate-x-4":"translate-x-0"}`}/>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1211,7 +1266,8 @@ function AbsolutePitchTab({audio}){
             <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45 mb-1">
               What note is this?
               {enabledOctaves.length>1&&<span className="ml-1 text-amber-200/25 normal-case tracking-normal">(multi-octave)</span>}
-              {autoAdvance&&<span className="ml-1 text-amber-500/50 normal-case tracking-normal">· auto</span>}
+              {autoAdvance&&!playbackRepeat&&<span className="ml-1 text-amber-500/50 normal-case tracking-normal">· auto</span>}
+              {autoAdvance&&playbackRepeat&&<span className="ml-1 text-amber-500/50 normal-case tracking-normal">· play it back</span>}
               {txOffset!==0&&<span className="ml-1 text-amber-500/40 normal-case tracking-normal">· {transposition} pitch</span>}
             </div>
 
@@ -1229,8 +1285,8 @@ function AbsolutePitchTab({audio}){
             {answered&&!autoAdvance&&(
               <div className="text-[9px] uppercase tracking-[0.18em] text-amber-200/30 mb-2">Tap any note to hear it</div>
             )}
-            {answered&&autoAdvance&&(
-              <div className="text-[10px] text-amber-200/30 mb-2">Next note loading…</div>
+            {answered&&autoAdvance&&!lastCorrect&&(
+              <div className="text-[10px] text-amber-200/40 mb-2">Tap the highlighted notes to compare</div>
             )}
 
             <div className="grid grid-cols-4 gap-2 mb-3">
@@ -1238,22 +1294,55 @@ function AbsolutePitchTab({audio}){
                 const midi=NOTE_NAMES.indexOf(n)+(currentNote?.octave??4+1)*12;
                 const isCorrect=answered&&n===currentNote?.name;
                 const isWrong=answered&&n!==currentNote?.name;
+
+                // In auto-advance mode after a wrong answer:
+                //   correct button → tappable (hear the right note)
+                //   wrong buttons  → disabled (no sound, just visual feedback)
+                // In auto-advance mode after a correct answer: we've already advanced, so this never renders.
+                // In manual mode: all buttons play their note after answering.
+                const onClick=answered
+                  ? autoAdvance
+                    ? isCorrect
+                      ? ()=>playNote(midi,{duration:1.5,gain:0.22})  // tap to hear correct
+                      : undefined                                        // wrong buttons silent
+                    : ()=>playNote(midi,{duration:1.5,gain:0.22})    // manual: all playable
+                  : ()=>handleGuess(n);
+
+                const disabled=answered&&(autoAdvance?isWrong:false);
+
                 return(
                   <button key={n}
-                    onClick={answered
-                      ?(autoAdvance?undefined:()=>playNote(midi,{duration:1.5,gain:0.22}))
-                      :()=>handleGuess(n)}
-                    disabled={answered&&autoAdvance}
+                    onClick={onClick}
+                    disabled={disabled}
                     className={`py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
-                      isCorrect?"bg-green-600 text-white shadow-[0_0_12px_rgba(34,197,94,0.4)] hover:bg-green-500":
-                      isWrong?"bg-red-900/40 text-red-300 border border-red-800/40 hover:bg-red-900/60":
-                      "bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:border-amber-500/50 hover:bg-amber-900/20"}`}>
+                      isCorrect
+                        ?"bg-green-600 text-white shadow-[0_0_12px_rgba(34,197,94,0.4)] hover:bg-green-500 cursor-pointer"
+                        :isWrong
+                          ?"bg-red-900/40 text-red-300 border border-red-800/40 opacity-60"
+                          :"bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:border-amber-500/50 hover:bg-amber-900/20"}`}>
                     {tx(n)}
                   </button>
                 );
               })}
             </div>
 
+            {/* Wrong answer in auto-advance mode: show error, let user compare, then tap to continue */}
+            {answered&&autoAdvance&&!lastCorrect&&(
+              <div style={{animation:"fadeIn 0.2s ease-out"}} className="space-y-2 text-center">
+                <div className="text-sm font-semibold text-red-400">
+                  ✗ Wrong — correct answer is{" "}
+                  <span className="text-green-400">{tx(currentNote?.name)}</span>
+                  {userGuess&&userGuess!==currentNote?.name&&<>{" "}· you selected{" "}<span className="text-red-300">{tx(userGuess)}</span></>}
+                </div>
+                <div className="text-[10px] text-amber-200/35">Tap the green note to hear it, then continue when ready</div>
+                <button onClick={generateAndPlay}
+                  className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all">
+                  Continue →
+                </button>
+              </div>
+            )}
+
+            {/* Manual mode post-answer */}
             {answered&&!autoAdvance&&(
               <div style={{animation:"fadeIn 0.25s ease-out"}}>
                 <div className={`text-sm font-semibold mb-3 ${lastCorrect?"text-green-400":"text-red-400"}`}>
@@ -1266,7 +1355,7 @@ function AbsolutePitchTab({audio}){
                     {classicAccuracy>=90&&progress.sessionTotal>=20&&progress.stageId<AP_STAGES.length&&" · 🎉 Stage unlocking soon!"}
                   </div>
                 )}
-                <button onClick={()=>autoAdvance?generateAndPlay():generateNote()}
+                <button onClick={generateNote}
                   className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all">
                   Next note →
                 </button>
