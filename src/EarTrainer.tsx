@@ -821,8 +821,15 @@ function AbsolutePitchTab({audio}){
   const [userGuess,setUserGuess]=useState(null);
   const [showNoteStats,setShowNoteStats]=useState(false);
   const [jumpStage,setJumpStage]=useState(false);
+  const [autoRunning,setAutoRunning]=useState(false); // true when auto/playback loop is active
 
   const autoAdvanceTimer=useRef(null);
+
+  const stopAutoLoop=useCallback(()=>{
+    clearTimeout(autoAdvanceTimer.current);
+    autoAdvanceTimer.current=null;
+    setAutoRunning(false);
+  },[]);
 
   const stage=AP_STAGES.find(s=>s.id===progress.stageId)||AP_STAGES[0];
 
@@ -844,8 +851,7 @@ function AbsolutePitchTab({audio}){
     setAnswered(false);setLastCorrect(null);setUserGuess(null);
   },[activeNotes,pickOctave]);
 
-  // Auto-play the note. In playbackRepeat mode: play → 1s → play again → 1s → show buttons.
-  // In normal auto-advance: play once immediately, show buttons straight away.
+  // Normal auto-advance: play note once, show buttons, wait for user tap.
   const generateAndPlay=useCallback(()=>{
     if(activeNotes.length===0) return;
     clearTimeout(autoAdvanceTimer.current);
@@ -854,25 +860,34 @@ function AbsolutePitchTab({audio}){
     const midi=NOTE_NAMES.indexOf(noteName)+(octave+1)*12;
     setCurrentNote({name:noteName,midi,octave});
     setAnswered(false);setLastCorrect(null);setUserGuess(null);
+    setAutoRunning(true);
+    autoAdvanceTimer.current=setTimeout(()=>playNote(midi,{duration:1.8,gain:0.24}),80);
+  },[activeNotes,pickOctave,playNote]);
 
-    if(playbackRepeat){
-      // First play
+  // Play-it-back: fully automatic loop — play → 1s → play again → 1s → next note.
+  const runPlaybackRepeat=useCallback(()=>{
+    if(activeNotes.length===0) return;
+    const noteName=randItem(activeNotes);
+    const octave=pickOctave();
+    const midi=NOTE_NAMES.indexOf(noteName)+(octave+1)*12;
+    setCurrentNote({name:noteName,midi,octave});
+    setAnswered(false);setLastCorrect(null);setUserGuess(null);
+    setAutoRunning(true);
+    autoAdvanceTimer.current=setTimeout(()=>{
+      playNote(midi,{duration:1.2,gain:0.24});
       autoAdvanceTimer.current=setTimeout(()=>{
-        playNote(midi,{duration:1.0,gain:0.24});
-        // Second play after 1s
+        playNote(midi,{duration:1.2,gain:0.24});
         autoAdvanceTimer.current=setTimeout(()=>{
-          playNote(midi,{duration:1.0,gain:0.24});
-          // Buttons become active after another 1s
-          // (state is already set above — buttons are enabled immediately after
-          //  setAnswered(false) so user CAN tap early if they know it, but the
-          //  two plays give them time to sing/play along first)
+          runPlaybackRepeat();
         },1000);
-      },80);
-    } else {
-      // Normal: play once, buttons already active
-      autoAdvanceTimer.current=setTimeout(()=>playNote(midi,{duration:1.8,gain:0.24}),80);
-    }
-  },[activeNotes,pickOctave,playNote,playbackRepeat]);
+      },1000);
+    },80);
+  },[activeNotes,pickOctave,playNote]);
+
+  const startAutoMode=useCallback(()=>{
+    if(playbackRepeat) runPlaybackRepeat();
+    else generateAndPlay();
+  },[playbackRepeat,runPlaybackRepeat,generateAndPlay]);
 
   useEffect(()=>{generateNote();},[stage.id,enabledOctaves.join(","),customNotesEnabled,customNotes.join(",")]);
   useEffect(()=>()=>clearTimeout(autoAdvanceTimer.current),[]);
@@ -900,14 +915,13 @@ function AbsolutePitchTab({audio}){
       });
     }
 
-    if(autoAdvance){
+    if(autoAdvance&&!playbackRepeat){
       if(correct){
-        // Correct: move instantly to the next note, no playback, no delay
         generateAndPlay();
       }
-      // Wrong: stay on this note, show error, let user tap buttons to compare — no auto-advance
-    } else {
-      // Manual mode: always re-play the note for reinforcement
+      // Wrong: stay, show error, user taps Continue
+    } else if(!autoAdvance){
+      // Manual mode: re-play the note for reinforcement
       setTimeout(()=>playNote(currentNote.midi,{duration:1.5,gain:0.22}),300);
     }
   };
@@ -1043,7 +1057,9 @@ function AbsolutePitchTab({audio}){
                   <div className="text-xs text-amber-100">Auto-advance</div>
                   <div className="text-[10px] text-amber-200/35">Correct → instant next note · Wrong → shows error, you tap to continue</div>
                 </div>
-                <button onClick={()=>patchAP({autoAdvance:!autoAdvance})} role="switch" aria-checked={autoAdvance}
+                <button
+                  onClick={()=>{ if(autoAdvance) stopAutoLoop(); patchAP({autoAdvance:!autoAdvance}); }}
+                  role="switch" aria-checked={autoAdvance}
                   className={`relative flex-shrink-0 ml-3 w-9 h-5 rounded-full transition-colors duration-200 ${autoAdvance?"bg-amber-500":"bg-amber-900/50"}`}>
                   <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#120d0a] transition-transform duration-200 ${autoAdvance?"translate-x-4":"translate-x-0"}`}/>
                 </button>
@@ -1264,102 +1280,150 @@ function AbsolutePitchTab({audio}){
           {/* Round card */}
           <div className="rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-4 text-center">
             <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45 mb-1">
-              What note is this?
-              {enabledOctaves.length>1&&<span className="ml-1 text-amber-200/25 normal-case tracking-normal">(multi-octave)</span>}
-              {autoAdvance&&!playbackRepeat&&<span className="ml-1 text-amber-500/50 normal-case tracking-normal">· auto</span>}
-              {autoAdvance&&playbackRepeat&&<span className="ml-1 text-amber-500/50 normal-case tracking-normal">· play it back</span>}
-              {txOffset!==0&&<span className="ml-1 text-amber-500/40 normal-case tracking-normal">· {transposition} pitch</span>}
+              {playbackRepeat&&autoAdvance?"Play it back — listen & match on your instrument"
+                :autoAdvance?"Auto-advance — what note is this?"
+                :"What note is this?"}
+              {enabledOctaves.length>1&&<span className="ml-1 text-amber-200/25 normal-case tracking-normal"> (multi-octave)</span>}
+              {txOffset!==0&&<span className="ml-1 text-amber-500/40 normal-case tracking-normal"> · {transposition} pitch</span>}
             </div>
 
-            <div className="flex justify-center gap-3 mb-4">
-              <button onClick={()=>currentNote&&playNote(currentNote.midi,{duration:1.8,gain:0.24})}
-                className="py-3 px-6 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]">
-                ▸ Play note
-              </button>
-              {answered&&(
-                <button onClick={()=>currentNote&&playNote(currentNote.midi,{duration:1.8,gain:0.24})}
-                  className="px-4 py-3 rounded-xl border border-amber-500/40 text-amber-300 text-sm hover:bg-amber-500/10">↺</button>
-              )}
-            </div>
-
-            {answered&&!autoAdvance&&(
-              <div className="text-[9px] uppercase tracking-[0.18em] text-amber-200/30 mb-2">Tap any note to hear it</div>
-            )}
-            {answered&&autoAdvance&&!lastCorrect&&(
-              <div className="text-[10px] text-amber-200/40 mb-2">Tap the highlighted notes to compare</div>
-            )}
-
-            <div className="grid grid-cols-4 gap-2 mb-3">
-              {answerNotes.map(n=>{
-                const midi=NOTE_NAMES.indexOf(n)+(currentNote?.octave??4+1)*12;
-                const isCorrect=answered&&n===currentNote?.name;
-                const isWrong=answered&&n!==currentNote?.name;
-
-                // In auto-advance mode after a wrong answer:
-                //   correct button → tappable (hear the right note)
-                //   wrong buttons  → disabled (no sound, just visual feedback)
-                // In auto-advance mode after a correct answer: we've already advanced, so this never renders.
-                // In manual mode: all buttons play their note after answering.
-                const onClick=answered
-                  ? autoAdvance
-                    ? isCorrect
-                      ? ()=>playNote(midi,{duration:1.5,gain:0.22})  // tap to hear correct
-                      : undefined                                        // wrong buttons silent
-                    : ()=>playNote(midi,{duration:1.5,gain:0.22})    // manual: all playable
-                  : ()=>handleGuess(n);
-
-                const disabled=answered&&(autoAdvance?isWrong:false);
-
-                return(
-                  <button key={n}
-                    onClick={onClick}
-                    disabled={disabled}
-                    className={`py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
-                      isCorrect
-                        ?"bg-green-600 text-white shadow-[0_0_12px_rgba(34,197,94,0.4)] hover:bg-green-500 cursor-pointer"
-                        :isWrong
-                          ?"bg-red-900/40 text-red-300 border border-red-800/40 opacity-60"
-                          :"bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:border-amber-500/50 hover:bg-amber-900/20"}`}>
-                    {tx(n)}
+            {/* ── PLAY-IT-BACK MODE: no answer buttons, just current note display + stop ── */}
+            {autoAdvance&&playbackRepeat?(
+              <div className="space-y-4 py-2">
+                {autoRunning?(
+                  <>
+                    <div className="text-4xl font-semibold text-amber-300 tracking-wide">
+                      {currentNote?tx(currentNote.name):"—"}
+                    </div>
+                    <div className="text-[10px] text-amber-200/35 leading-relaxed">
+                      Plays note → 1s gap → plays again → 1s gap → next note
+                    </div>
+                    <button onClick={stopAutoLoop}
+                      className="w-full py-2.5 rounded-xl border border-amber-900/40 text-amber-200/60 text-xs hover:bg-amber-900/20 transition-all">
+                      ■ Stop
+                    </button>
+                  </>
+                ):(
+                  <button onClick={startAutoMode}
+                    className="w-full py-3 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]">
+                    ▸ Start play-it-back
                   </button>
-                );
-              })}
-            </div>
-
-            {/* Wrong answer in auto-advance mode: show error, let user compare, then tap to continue */}
-            {answered&&autoAdvance&&!lastCorrect&&(
-              <div style={{animation:"fadeIn 0.2s ease-out"}} className="space-y-2 text-center">
-                <div className="text-sm font-semibold text-red-400">
-                  ✗ Wrong — correct answer is{" "}
-                  <span className="text-green-400">{tx(currentNote?.name)}</span>
-                  {userGuess&&userGuess!==currentNote?.name&&<>{" "}· you selected{" "}<span className="text-red-300">{tx(userGuess)}</span></>}
-                </div>
-                <div className="text-[10px] text-amber-200/35">Tap the green note to hear it, then continue when ready</div>
-                <button onClick={generateAndPlay}
-                  className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all">
-                  Continue →
-                </button>
+                )}
               </div>
-            )}
 
-            {/* Manual mode post-answer */}
-            {answered&&!autoAdvance&&(
-              <div style={{animation:"fadeIn 0.25s ease-out"}}>
-                <div className={`text-sm font-semibold mb-3 ${lastCorrect?"text-green-400":"text-red-400"}`}>
-                  {lastCorrect?"✓ Correct!":"✗ That was "+tx(currentNote?.name)}
-                  {!lastCorrect&&<span className="text-[10px] text-amber-200/40 block mt-0.5">Note plays again — listen carefully</span>}
-                </div>
-                {!customNotesEnabled&&classicAccuracy!==null&&progress.sessionTotal>=5&&(
-                  <div className="text-[10px] text-amber-200/40 mb-2">
-                    {classicAccuracy}% over {progress.sessionTotal} trials
-                    {classicAccuracy>=90&&progress.sessionTotal>=20&&progress.stageId<AP_STAGES.length&&" · 🎉 Stage unlocking soon!"}
+            ):(
+              <>
+                {/* Manual play button — hidden in auto-advance */}
+                {!autoAdvance&&(
+                  <div className="flex justify-center gap-3 mb-4">
+                    <button onClick={()=>currentNote&&playNote(currentNote.midi,{duration:1.8,gain:0.24})}
+                      className="py-3 px-6 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]">
+                      ▸ Play note
+                    </button>
+                    {answered&&(
+                      <button onClick={()=>currentNote&&playNote(currentNote.midi,{duration:1.8,gain:0.24})}
+                        className="px-4 py-3 rounded-xl border border-amber-500/40 text-amber-300 text-sm hover:bg-amber-500/10">↺</button>
+                    )}
                   </div>
                 )}
-                <button onClick={generateNote}
-                  className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all">
-                  Next note →
-                </button>
-              </div>
+
+                {/* Auto-advance start button when loop not yet running */}
+                {autoAdvance&&!playbackRepeat&&!autoRunning&&(
+                  <div className="mb-4">
+                    <button onClick={startAutoMode}
+                      className="w-full py-3 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]">
+                      ▸ Start auto-advance
+                    </button>
+                  </div>
+                )}
+
+                {/* Stop button for auto-advance while running */}
+                {autoAdvance&&!playbackRepeat&&autoRunning&&!answered&&(
+                  <div className="mb-4 flex justify-end">
+                    <button onClick={stopAutoLoop}
+                      className="px-3 py-1.5 rounded-lg border border-amber-900/40 text-amber-200/40 text-xs hover:bg-amber-900/20 transition-all">
+                      ■ Stop
+                    </button>
+                  </div>
+                )}
+
+                {/* Hint text above buttons */}
+                {answered&&!autoAdvance&&(
+                  <div className="text-[9px] uppercase tracking-[0.18em] text-amber-200/30 mb-2">Tap any note to hear it</div>
+                )}
+                {answered&&autoAdvance&&!lastCorrect&&(
+                  <div className="text-[10px] text-amber-200/40 mb-2">Tap the green note to hear it</div>
+                )}
+
+                {/* Answer button grid */}
+                <div className="grid grid-cols-4 gap-2 mb-3">
+                  {answerNotes.map(n=>{
+                    const midi=NOTE_NAMES.indexOf(n)+(currentNote?.octave??4+1)*12;
+                    const isCorrect=answered&&n===currentNote?.name;
+                    const isWrong=answered&&n!==currentNote?.name;
+
+                    // Button behaviour:
+                    // - Not yet answered: tap to submit guess (never plays sound)
+                    // - Answered, manual mode: tap to hear that note
+                    // - Answered, auto-advance, correct button: tap to hear correct note
+                    // - Answered, auto-advance, wrong buttons: disabled, no sound
+                    const onClick=answered
+                      ?autoAdvance
+                        ?isCorrect?()=>playNote(midi,{duration:1.5,gain:0.22}):undefined
+                        :()=>playNote(midi,{duration:1.5,gain:0.22})
+                      :()=>handleGuess(n);
+
+                    const disabled=answered&&autoAdvance&&isWrong;
+
+                    return(
+                      <button key={n} onClick={onClick} disabled={disabled}
+                        className={`py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
+                          isCorrect
+                            ?"bg-green-600 text-white shadow-[0_0_12px_rgba(34,197,94,0.4)] hover:bg-green-500"
+                            :isWrong
+                              ?"bg-red-900/40 text-red-300 border border-red-800/40 opacity-60"
+                              :"bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:border-amber-500/50 hover:bg-amber-900/20"}`}>
+                        {tx(n)}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Wrong answer in auto-advance */}
+                {answered&&autoAdvance&&!lastCorrect&&(
+                  <div style={{animation:"fadeIn 0.2s ease-out"}} className="space-y-2">
+                    <div className="text-sm font-semibold text-red-400">
+                      ✗ Wrong — correct is <span className="text-green-400">{tx(currentNote?.name)}</span>
+                      {userGuess&&userGuess!==currentNote?.name&&
+                        <> · you selected <span className="text-red-300">{tx(userGuess)}</span></>}
+                    </div>
+                    <button onClick={generateAndPlay}
+                      className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all">
+                      Continue →
+                    </button>
+                  </div>
+                )}
+
+                {/* Manual mode post-answer */}
+                {answered&&!autoAdvance&&(
+                  <div style={{animation:"fadeIn 0.25s ease-out"}}>
+                    <div className={`text-sm font-semibold mb-3 ${lastCorrect?"text-green-400":"text-red-400"}`}>
+                      {lastCorrect?"✓ Correct!":"✗ That was "+tx(currentNote?.name)}
+                      {!lastCorrect&&<span className="text-[10px] text-amber-200/40 block mt-0.5">Note plays again — listen carefully</span>}
+                    </div>
+                    {!customNotesEnabled&&classicAccuracy!==null&&progress.sessionTotal>=5&&(
+                      <div className="text-[10px] text-amber-200/40 mb-2">
+                        {classicAccuracy}% over {progress.sessionTotal} trials
+                        {classicAccuracy>=90&&progress.sessionTotal>=20&&progress.stageId<AP_STAGES.length&&" · 🎉 Stage unlocking soon!"}
+                      </div>
+                    )}
+                    <button onClick={generateNote}
+                      className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all">
+                      Next note →
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
