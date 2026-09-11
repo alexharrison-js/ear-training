@@ -137,12 +137,12 @@ const AUDIO_DEFAULTS = {
 
 const AP_SETTINGS_DEFAULTS = {
   apMode: "classic",
-  discFocusPitch: "F",
+  discFocusNotes: ["F","B"],  // notes the user is trying to identify — replaces single discFocusPitch
   enabledOctaves: [4],
   customNotesEnabled: false,
   customNotes: ["F","B"],
   autoAdvance: false,
-  playbackRepeat: false, // play note, wait 1s, play again, wait 1s, then advance
+  playbackRepeat: false,
   transposition: "C",
 };
 
@@ -797,7 +797,7 @@ function AbsolutePitchTab({audio}){
   const patchAP=(patch)=>setApSettings(p=>({...p,...patch}));
 
   const apMode            = apSettings.apMode;
-  const discFocusPitch    = apSettings.discFocusPitch;
+  const discFocusNotes    = apSettings.discFocusNotes?.length ? apSettings.discFocusNotes : ["F","B"];
   const enabledOctaves    = apSettings.enabledOctaves?.length ? apSettings.enabledOctaves : [4];
   const customNotesEnabled= apSettings.customNotesEnabled;
   const customNotes       = apSettings.customNotes?.length ? apSettings.customNotes : ["F","B"];
@@ -955,40 +955,84 @@ function AbsolutePitchTab({audio}){
   const [discProgress,setDiscProgress]=useState(()=>lsGet("ear_trainer_ap_disc_v1",AP_DISC_DEFAULT));
   useEffect(()=>lsSet("ear_trainer_ap_disc_v1",discProgress),[discProgress]);
 
-  const [discTrial,setDiscTrial]=useState(null);
+  const [discTrial,setDiscTrial]=useState(null);   // {midi, name, octave}
   const [discAnswered,setDiscAnswered]=useState(false);
   const [discLastCorrect,setDiscLastCorrect]=useState(null);
+  const [discUserGuess,setDiscUserGuess]=useState(null); // note name or "other"
+  const [discRunning,setDiscRunning]=useState(false);
+  const discTimerRef=useRef(null);
 
-  const generateDiscTrial=useCallback(()=>{
+  const stopDiscLoop=useCallback(()=>{
+    clearTimeout(discTimerRef.current);
+    discTimerRef.current=null;
+    setDiscRunning(false);
+  },[]);
+
+  // Generate a trial: pick ANY note from the active octaves.
+  // The user then identifies whether it's one of their focus notes or "other".
+  const generateDiscTrial=useCallback((autoPlay=false)=>{
+    clearTimeout(discTimerRef.current);
+    const noteName=randItem(NOTE_NAMES); // any of the 12 chromatic notes
     const octave=pickOctave();
-    const baseMidi=NOTE_NAMES.indexOf(discFocusPitch)+(octave+1)*12;
-    const isTarget=Math.random()<0.5;
-    const midi=isTarget?baseMidi:baseMidi+randItem([-2,-1,1,2]);
-    const name=NOTE_NAMES[((midi%12)+12)%12];
-    setDiscTrial({midi,isTarget,name,baseMidi});
-    setDiscAnswered(false);setDiscLastCorrect(null);
-  },[discFocusPitch,pickOctave]);
+    const midi=NOTE_NAMES.indexOf(noteName)+(octave+1)*12;
+    setDiscTrial({midi,name:noteName,octave});
+    setDiscAnswered(false);setDiscLastCorrect(null);setDiscUserGuess(null);
+    if(autoPlay){
+      setDiscRunning(true);
+      discTimerRef.current=setTimeout(()=>playNote(midi,{duration:1.8,gain:0.24}),80);
+    }
+  },[pickOctave,playNote]);
 
-  useEffect(()=>{if(apMode==="discrimination") generateDiscTrial();},[apMode,discFocusPitch,enabledOctaves.join(",")]);
+  useEffect(()=>{
+    if(apMode==="discrimination"){ stopDiscLoop(); generateDiscTrial(false); }
+  },[apMode,discFocusNotes.join(","),enabledOctaves.join(",")]);
 
-  const handleDiscGuess=(userSaidTarget)=>{
+  useEffect(()=>()=>clearTimeout(discTimerRef.current),[]);
+
+  // guessValue: a note name (one of discFocusNotes) or "other"
+  const handleDiscGuess=useCallback((guessValue)=>{
     if(discAnswered||!discTrial) return;
-    const correct=userSaidTarget===discTrial.isTarget;
-    setDiscAnswered(true);setDiscLastCorrect(correct);
-    setTimeout(()=>playNote(discTrial.baseMidi,{duration:1.5,gain:0.26}),350);
+    const actualName=discTrial.name;
+    // Correct if: user picked a specific note and it matches, or user picked "other" and it's not a focus note
+    const isFocusNote=discFocusNotes.some(n=>normalizeNote(n)===normalizeNote(actualName));
+    const correct=guessValue==="other"
+      ?!isFocusNote
+      :normalizeNote(guessValue)===normalizeNote(actualName);
+
+    setDiscAnswered(true);setDiscLastCorrect(correct);setDiscUserGuess(guessValue);
+
+    // Update stats per note
     setDiscProgress(prev=>{
       const ps={...prev.pitchStats};
-      const p=ps[discFocusPitch]||{correct:0,total:0};
-      ps[discFocusPitch]={correct:p.correct+(correct?1:0),total:p.total+1};
+      const p=ps[actualName]||{correct:0,total:0};
+      ps[actualName]={correct:p.correct+(correct?1:0),total:p.total+1};
       return{...prev,pitchStats:ps,
         sessionCorrect:prev.sessionCorrect+(correct?1:0),
         sessionTotal:prev.sessionTotal+1};
     });
-  };
 
-  const discAccuracy=discProgress.sessionTotal>0?Math.round((discProgress.sessionCorrect/discProgress.sessionTotal)*100):null;
-  const discPitchAcc=discProgress.pitchStats[discFocusPitch];
-  const discPitchPct=discPitchAcc?.total>0?Math.round((discPitchAcc.correct/discPitchAcc.total)*100):null;
+    if(autoAdvance){
+      if(correct){
+        // Correct: instant next trial
+        generateDiscTrial(true);
+      }
+      // Wrong: stay, show error, user taps Continue
+    }
+    // No re-play of the note in any case
+  },[discAnswered,discTrial,discFocusNotes,autoAdvance,generateDiscTrial]);
+
+  const discAccuracy=discProgress.sessionTotal>0
+    ?Math.round((discProgress.sessionCorrect/discProgress.sessionTotal)*100):null;
+
+  const toggleDiscNote=(note)=>{
+    const norm=normalizeNote(note);
+    const current=discFocusNotes.map(n=>normalizeNote(n));
+    const next=current.includes(norm)
+      ?discFocusNotes.filter(n=>normalizeNote(n)!==norm)
+      :[...discFocusNotes,note];
+    if(next.length===0) return;
+    patchAP({discFocusNotes:next});
+  };
 
   return(
     <div className="space-y-3">
@@ -1017,9 +1061,28 @@ function AbsolutePitchTab({audio}){
                 ))}
               </div>
               {apMode==="discrimination"&&(
-                <Select label="Focus pitch" value={discFocusPitch}
-                  onChange={v=>patchAP({discFocusPitch:v})}
-                  options={NOTE_NAMES.map(n=>({value:n,label:tx(n)}))}/>
+                <div className="border border-amber-900/30 rounded-lg p-2.5 space-y-2">
+                  <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35">
+                    Focus notes — tap to select which notes to identify
+                  </div>
+                  <div className="grid grid-cols-6 gap-1">
+                    {NOTE_NAMES.map(n=>{
+                      const selected=discFocusNotes.some(fn=>normalizeNote(fn)===normalizeNote(n));
+                      return(
+                        <button key={n} onClick={()=>toggleDiscNote(n)}
+                          className={`py-2 rounded-lg text-xs font-semibold transition-all ${
+                            selected?"bg-amber-500 text-[#1a1208]":
+                            "border border-amber-900/40 text-amber-200/50 hover:bg-amber-900/20"}`}>
+                          {tx(n)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="text-[10px] text-amber-200/30">
+                    {discFocusNotes.length} selected: {discFocusNotes.map(n=>tx(n)).join(" · ")}
+                    {" "}· app plays any note, you identify it or tap "Other"
+                  </div>
+                </div>
               )}
             </div>
 
@@ -1172,52 +1235,108 @@ function AbsolutePitchTab({audio}){
 
       {/* ── DISCRIMINATION MODE ── */}
       {apMode==="discrimination"&&(
-        <div className="rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-4 text-center space-y-3">
+        <div className="rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-4 space-y-3">
+
+          {/* Stats row */}
           <div className="flex justify-between text-[10px] text-amber-200/35 px-1">
             <span>Session {discAccuracy!==null?`${discAccuracy}%`:"—"} ({discProgress.sessionCorrect}/{discProgress.sessionTotal})</span>
-            <span>{tx(discFocusPitch)}: {discPitchPct!==null?`${discPitchPct}%`:"—"} ({discPitchAcc?.total||0})</span>
+            <button onClick={()=>{stopDiscLoop();setDiscProgress({...AP_DISC_DEFAULT});generateDiscTrial(false);}}
+              className="text-amber-200/25 hover:text-amber-200/50 transition-colors">reset stats</button>
           </div>
-          <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45">
-            Is this note a {tx(discFocusPitch)}?
+
+          <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45 text-center">
+            What note is this?
+            {txOffset!==0&&<span className="ml-1 normal-case tracking-normal text-amber-500/40">· {transposition} pitch</span>}
           </div>
-          <div className="flex justify-center gap-3">
-            <button onClick={()=>discTrial&&playNote(discTrial.midi,{duration:1.8,gain:0.26})}
-              className="py-3 px-8 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]">
-              ▸ Hear note
-            </button>
-            {discAnswered&&<button onClick={()=>discTrial&&playNote(discTrial.midi,{duration:1.8,gain:0.26})}
-              className="px-4 py-3 rounded-xl border border-amber-500/40 text-amber-300 text-sm hover:bg-amber-500/10">↺</button>}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {[{v:true,l:`Yes — it's ${tx(discFocusPitch)}`},{v:false,l:"No — different note"}].map(o=>(
-              <button key={String(o.v)} onClick={()=>handleDiscGuess(o.v)} disabled={discAnswered}
-                className={`py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
-                  discAnswered&&discTrial?.isTarget===o.v
-                    ?(discLastCorrect?"bg-green-600 text-white":"bg-red-900/40 text-red-300 border border-red-800/40")
-                    :discAnswered?"bg-[#1a1410] border border-amber-900/30 text-amber-200/30"
-                    :"bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:bg-amber-900/20"}`}>
-                {o.l}
-              </button>
-            ))}
-          </div>
-          {discAnswered&&(
-            <div style={{animation:"fadeIn 0.25s ease-out"}} className="space-y-2">
-              <div className={`text-sm font-semibold ${discLastCorrect?"text-green-400":"text-red-400"}`}>
-                {discLastCorrect?"✓ Correct!":"✗ Wrong"}
-              </div>
-              <div className="text-[10px] text-amber-200/45">
-                That was {tx(discTrial?.name)} · True {tx(discFocusPitch)} now playing for comparison
-              </div>
-              <button onClick={generateDiscTrial}
-                className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all">
-                Next trial →
+
+          {/* Play / replay button — only in manual mode */}
+          {!autoAdvance&&(
+            <div className="flex justify-center gap-3">
+              <button onClick={()=>discTrial&&playNote(discTrial.midi,{duration:1.8,gain:0.24})}
+                className="py-3 px-8 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]">
+                ▸ Hear note
               </button>
             </div>
           )}
-          <button onClick={()=>{setDiscProgress({...AP_DISC_DEFAULT});generateDiscTrial();}}
-            className="text-[10px] text-amber-200/25 hover:text-amber-200/50 transition-colors">
-            Reset discrimination stats
-          </button>
+
+          {/* Auto-advance start/stop */}
+          {autoAdvance&&!discRunning&&!discAnswered&&(
+            <button onClick={()=>generateDiscTrial(true)}
+              className="w-full py-3 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]">
+              ▸ Start
+            </button>
+          )}
+          {autoAdvance&&discRunning&&!discAnswered&&(
+            <div className="flex justify-end">
+              <button onClick={stopDiscLoop}
+                className="px-3 py-1.5 rounded-lg border border-amber-900/40 text-amber-200/40 text-xs hover:bg-amber-900/20">■ Stop</button>
+            </div>
+          )}
+
+          {/* Answer buttons: one per focus note + Other */}
+          {(!autoAdvance||(autoAdvance&&discRunning)||discAnswered)&&(
+            <div className={`grid gap-2 ${discFocusNotes.length<=3?"grid-cols-"+Math.min(discFocusNotes.length+1,4):"grid-cols-4"}`}
+              style={{gridTemplateColumns:`repeat(${Math.min(discFocusNotes.length+1,4)},1fr)`}}>
+              {discFocusNotes.map(n=>{
+                const norm=normalizeNote(n);
+                const isCorrectAnswer=discAnswered&&discTrial&&normalizeNote(discTrial.name)===norm;
+                const wasMyGuess=discAnswered&&discUserGuess===n;
+                return(
+                  <button key={n} onClick={()=>handleDiscGuess(n)} disabled={discAnswered}
+                    className={`py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
+                      isCorrectAnswer&&discLastCorrect?"bg-green-600 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]":
+                      isCorrectAnswer&&!discLastCorrect?"bg-green-600 text-white":
+                      wasMyGuess&&!discLastCorrect?"bg-red-900/50 text-red-300 border border-red-800/40":
+                      discAnswered?"bg-[#1a1410] border border-amber-900/20 text-amber-200/25":
+                      "bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:border-amber-500/50 hover:bg-amber-900/20"}`}>
+                    {tx(n)}
+                  </button>
+                );
+              })}
+              {/* Other button */}
+              {(()=>{
+                const isOtherCorrect=discAnswered&&discTrial&&!discFocusNotes.some(n=>normalizeNote(n)===normalizeNote(discTrial.name));
+                const wasOtherMyGuess=discAnswered&&discUserGuess==="other";
+                return(
+                  <button onClick={()=>handleDiscGuess("other")} disabled={discAnswered}
+                    className={`py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
+                      isOtherCorrect&&discLastCorrect?"bg-green-600 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]":
+                      isOtherCorrect&&!discLastCorrect?"bg-green-600 text-white":
+                      wasOtherMyGuess&&!discLastCorrect?"bg-red-900/50 text-red-300 border border-red-800/40":
+                      discAnswered?"bg-[#1a1410] border border-amber-900/20 text-amber-200/25":
+                      "bg-[#1a1410] border border-amber-900/40 text-amber-200/60 hover:border-amber-500/50 hover:bg-amber-900/20 italic"}`}>
+                    Other
+                  </button>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Post-answer feedback */}
+          {discAnswered&&(
+            <div style={{animation:"fadeIn 0.2s ease-out"}} className="text-center space-y-2">
+              {discLastCorrect?(
+                <div className="text-sm font-semibold text-green-400">✓ Correct — {tx(discTrial?.name)}</div>
+              ):(
+                <>
+                  <div className="text-sm font-semibold text-red-400">
+                    ✗ Wrong — the note was <span className="text-green-400">{tx(discTrial?.name)}</span>
+                    {discUserGuess&&<span className="text-red-300/70"> · you selected {discUserGuess==="other"?"Other":tx(discUserGuess)}</span>}
+                  </div>
+                  <button onClick={()=>generateDiscTrial(autoAdvance)}
+                    className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all">
+                    Continue →
+                  </button>
+                </>
+              )}
+              {!autoAdvance&&discLastCorrect&&(
+                <button onClick={()=>generateDiscTrial(false)}
+                  className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all">
+                  Next →
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
