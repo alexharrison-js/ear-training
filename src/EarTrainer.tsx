@@ -137,7 +137,8 @@ const AUDIO_DEFAULTS = {
 
 const AP_SETTINGS_DEFAULTS = {
   apMode: "classic",
-  discFocusNotes: ["F","B"],  // notes the user is trying to identify — replaces single discFocusPitch
+  discFocusNotes: ["F","B"],
+  closeDistractors: false, // when on: plays focus note or ±1-2 semitone neighbour
   enabledOctaves: [4],
   customNotesEnabled: false,
   customNotes: ["F","B"],
@@ -798,6 +799,7 @@ function AbsolutePitchTab({audio}){
 
   const apMode            = apSettings.apMode;
   const discFocusNotes    = apSettings.discFocusNotes?.length ? apSettings.discFocusNotes : ["F","B"];
+  const closeDistractors  = apSettings.closeDistractors || false;
   const enabledOctaves    = apSettings.enabledOctaves?.length ? apSettings.enabledOctaves : [4];
   const customNotesEnabled= apSettings.customNotesEnabled;
   const customNotes       = apSettings.customNotes?.length ? apSettings.customNotes : ["F","B"];
@@ -972,16 +974,37 @@ function AbsolutePitchTab({audio}){
   // The user then identifies whether it's one of their focus notes or "other".
   const generateDiscTrial=useCallback((autoPlay=false)=>{
     clearTimeout(discTimerRef.current);
-    const noteName=randItem(NOTE_NAMES); // any of the 12 chromatic notes
+
+    let noteName, midi;
     const octave=pickOctave();
-    const midi=NOTE_NAMES.indexOf(noteName)+(octave+1)*12;
+
+    if(closeDistractors && discFocusNotes.length>0){
+      // Pick a random focus note as the anchor
+      const anchorName=normalizeNote(randItem(discFocusNotes));
+      const anchorMidi=NOTE_NAMES.indexOf(anchorName)+(octave+1)*12;
+      // 50% chance: play the focus note itself; 50%: play a ±1 or ±2 semitone neighbour
+      const isTarget=Math.random()<0.5;
+      if(isTarget){
+        midi=anchorMidi;
+        noteName=anchorName;
+      } else {
+        const offset=randItem([-2,-1,1,2]);
+        midi=anchorMidi+offset;
+        noteName=NOTE_NAMES[((midi%12)+12)%12];
+      }
+    } else {
+      // Broad mode: any of the 12 notes
+      noteName=randItem(NOTE_NAMES);
+      midi=NOTE_NAMES.indexOf(noteName)+(octave+1)*12;
+    }
+
     setDiscTrial({midi,name:noteName,octave});
     setDiscAnswered(false);setDiscLastCorrect(null);setDiscUserGuess(null);
     if(autoPlay){
       setDiscRunning(true);
       discTimerRef.current=setTimeout(()=>playNote(midi,{duration:1.8,gain:0.24}),80);
     }
-  },[pickOctave,playNote]);
+  },[pickOctave,playNote,closeDistractors,discFocusNotes]);
 
   useEffect(()=>{
     if(apMode==="discrimination"){ stopDiscLoop(); generateDiscTrial(false); }
@@ -1080,7 +1103,25 @@ function AbsolutePitchTab({audio}){
                   </div>
                   <div className="text-[10px] text-amber-200/30">
                     {discFocusNotes.length} selected: {discFocusNotes.map(n=>tx(n)).join(" · ")}
-                    {" "}· app plays any note, you identify it or tap "Other"
+                    {" "}· app plays a note, you identify it or tap "Other"
+                  </div>
+
+                  {/* Close distractors toggle */}
+                  <div className="border-t border-amber-900/30 pt-2 flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs text-amber-100">Close distractors</div>
+                      <div className="text-[10px] text-amber-200/30 leading-snug mt-0.5">
+                        When on: plays your focus notes or ±1–2 semitone neighbours only.
+                        Harder — forces fine chroma discrimination. Wong 2025 protocol.
+                        {closeDistractors&&discFocusNotes.length>1&&
+                          <span className="block mt-0.5 text-amber-400/50">Anchor rotates through your {discFocusNotes.length} focus notes.</span>}
+                      </div>
+                    </div>
+                    <button onClick={()=>patchAP({closeDistractors:!closeDistractors})}
+                      role="switch" aria-checked={closeDistractors}
+                      className={`relative flex-shrink-0 w-9 h-5 rounded-full transition-colors duration-200 ${closeDistractors?"bg-amber-500":"bg-amber-900/50"}`}>
+                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#120d0a] transition-transform duration-200 ${closeDistractors?"translate-x-4":"translate-x-0"}`}/>
+                    </button>
                   </div>
                 </div>
               )}
@@ -1245,7 +1286,7 @@ function AbsolutePitchTab({audio}){
           </div>
 
           <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45 text-center">
-            What note is this?
+            {closeDistractors?"Focus note or close neighbour?":"What note is this?"}
             {txOffset!==0&&<span className="ml-1 normal-case tracking-normal text-amber-500/40">· {transposition} pitch</span>}
           </div>
 
