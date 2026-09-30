@@ -11,7 +11,7 @@
 
   /* HERO COLORS — these should dominate the interface */
   --yellow:       #FFF06A;   /* bright candy yellow */
-  --pink:         #F4A9D5;   /* softer pastel pink */
+  --pink:         #F4A9D5;   /* soft pastel pink */
   --lime:         #B8F77D;   /* bright pastel lime */
   --lavender:     #C8B9FA;   /* candy lavender */
 
@@ -26,7 +26,7 @@
   --green:        #78D96A;   /* saturated green */
 
   /* WARM ACCENTS */
-  --peach:        #F2A875;   /* replaces muted orange */
+  --peach:        #F2A875;   /* warm candy peach */
   --yellow-mid:   #E8D65F;   /* yellow shadow / secondary */
 
   /* ── NEUTRALS ─────────────────────────────────────────────── */
@@ -34,9 +34,10 @@
   --white:        #FFFDFE;
   --cream:        #FFF8E7;
 
+  /* Heavy illustration-style outline */
   --ink:          #0A080B;
 
-  /* Much more purple than gray */
+  /* Purple-tinted dark foundation */
   --dark-1:       #211A2B;
   --dark-2:       #302641;
   --dark-3:       #514565;
@@ -46,18 +47,11 @@
 
   --bg:             var(--dark-1);
   --surface:        var(--dark-2);
-
-  /* Elevated surfaces get a subtle purple/pink character */
   --surface-raised: #3C3150;
 
   --border:         var(--dark-3);
-
-  /* Blue remains your functional/focus color */
   --border-focus:   var(--blue);
-
-  /* Yellow = attention / active energy */
   --border-active:  var(--yellow);
-
 
   /* ── TEXT ─────────────────────────────────────────────────── */
 
@@ -69,69 +63,59 @@
   --text-on-lime:   var(--ink);
   --text-on-pink:   var(--ink);
 
-
   /* ── PRIMARY ACTIONS ──────────────────────────────────────── */
 
-  --cta:            var(--yellow);
-  --cta-hover:      #FFF58C;
-  --cta-active:     #FFE94D;
-  --cta-text:       var(--ink);
+  --cta:               var(--yellow);
+  --cta-hover:         #FFF58C;
+  --cta-active:        #FFE94D;
+  --cta-text:          var(--ink);
 
-  /* Pink becomes a genuine secondary action */
-  --cta-secondary:      var(--pink);
+  /* Pink secondary action */
+  --cta-secondary:       var(--pink);
   --cta-secondary-hover: #F8BDE0;
-  --cta-secondary-text: var(--ink);
-
+  --cta-secondary-text:  var(--ink);
 
   /* ── CORRECT / INCORRECT ──────────────────────────────────── */
 
-  /* Correct = unmistakably lime */
+  /* Correct = bright lime */
   --correct:        var(--lime);
   --correct-hover:  #C7FA99;
-  --correct-glow:   rgba(184,247,125,.45);
+  --correct-glow:   rgba(184, 247, 125, 0.45);
 
   /* Wrong = candy pink */
   --wrong:          var(--pink-deep);
-  --wrong-bg:       rgba(223,127,194,.16);
-  --wrong-border:   rgba(223,127,194,.55);
-
+  --wrong-bg:       rgba(223, 127, 194, 0.16);
+  --wrong-border:   rgba(223, 127, 194, 0.55);
 
   /* ── STREAK ───────────────────────────────────────────────── */
 
-  /* Yellow is energetic; pink/lime can appear as secondary dots */
   --streak-active:    var(--yellow);
   --streak-highlight: var(--pink);
   --streak-success:   var(--lime);
-  --streak-inactive:  rgba(81,69,101,.55);
-
+  --streak-inactive:  rgba(81, 69, 101, 0.55);
 
   /* ── TOGGLES ──────────────────────────────────────────────── */
 
   --toggle-on:       var(--lime);
-  --toggle-off:      rgba(81,69,101,.65);
+  --toggle-off:      rgba(81, 69, 101, 0.65);
   --toggle-thumb:    var(--ink);
-
 
   /* ── STAGE / PROGRESS ─────────────────────────────────────── */
 
-  /* Rather than making every stage lavender... */
-
   --stage-done:      var(--lime);
   --stage-current:   var(--yellow);
-  --stage-future:    rgba(81,69,101,.45);
+  --stage-future:    rgba(81, 69, 101, 0.45);
 
-  /* Optional alternate stage colors */
+  /* Optional decorative stage colors */
   --stage-pink:      var(--pink);
   --stage-blue:      var(--blue);
   --stage-lavender:  var(--lavender);
-
 
   /* ── SELECTIONS ───────────────────────────────────────────── */
 
   --select-bg:       var(--dark-1);
   --select-border:   var(--dark-3);
   --select-focus:    var(--yellow);
-
 
   /* ── DECORATIVE ACCENTS ───────────────────────────────────── */
 
@@ -140,28 +124,17 @@
   --accent-yellow:   var(--yellow);
   --accent-lavender: var(--lavender);
   --accent-aqua:     var(--aqua);
-
+  --accent-sky:      var(--sky);
+  --accent-peach:    var(--peach);
 
   /* ── SHADOWS / GLOWS ───────────────────────────────────────── */
 
-  --shadow-cta:
-    0 4px 18px rgba(255,240,106,.35);
+  --shadow-cta:       0 4px 18px rgba(255, 240, 106, 0.35);
+  --shadow-pink:      0 4px 18px rgba(244, 169, 213, 0.30);
+  --shadow-correct:   0 0 18px rgba(184, 247, 125, 0.45);
 
-  --shadow-pink:
-    0 4px 18px rgba(244,169,213,.30);
-
-  --shadow-correct:
-    0 0 18px rgba(184,247,125,.45);
-
-  --glow-yellow:
-    0 0 16px rgba(255,240,106,.35);
-
-  --glow-pink:
-    0 0 16px rgba(244,169,213,.30);
-
-  --glow-lime:
-    0 0 16px rgba(184,247,125,.35);
-
-  --glow-blue:
-    0 0 14px rgba(117,152,240,.30);
+  --glow-yellow:      0 0 16px rgba(255, 240, 106, 0.35);
+  --glow-pink:        0 0 16px rgba(244, 169, 213, 0.30);
+  --glow-lime:        0 0 16px rgba(184, 247, 125, 0.35);
+  --glow-blue:        0 0 14px rgba(117, 152, 240, 0.30);
 }
