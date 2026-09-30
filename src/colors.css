@@ -1,54 +1,69 @@
-/* ═══════════════════════════════════════════════════════════════
-   EAR TRAINER — REDESIGN TOKEN SYSTEM
-   Updated: Pastel-dominant / Y2K energy
-   Predominant pink & blue with yellow and lime accents
-   Maintains heavy outlines and illustrative style.
-   ═══════════════════════════════════════════════════════════════ */
-
+/* Add this block to your main index.css / App.css file */
 :root {
+  /* ── Core palette ──────────────────────────────────────────── */
+  --yellow:     #FAF270;   /* primary — CTA buttons, active state */
+  --pink:       #EEBADC;   /* primary — secondary highlights      */
+  --blue:       #7598F0;   /* primary — links, focus rings        */
+  --lavender:   #C0B2F5;   /* primary — stage progress, tags      */
 
-  /* ── CORE PALETTE ────────────────────────────────────────── */
+  --pink-deep:  #E48FCC;   /* secondary pink — hover, accents     */
+  --sky:        #8BBBF1;   /* secondary blue — info states        */
+  --aqua:       #B1EFF0;   /* secondary aqua — subtle highlights  */
+  --lime:       #B2F47B;   /* success / correct                   */
+  --yellow-mid: #DFCB77;   /* muted yellow — streak dots active   */
+  --orange:     #C38754;   /* warning / caution                   */
+  --green:      #77C869;   /* alternate success                   */
 
-  /* HERO COLORS — Redistributed dominance */
-  --pink-pastel:  #FBD3E9;   /* dominant background/surfaces */
-  --blue-baby:    #A3E1F4;   /* dominant cards/surfaces */
-  --yellow-bright:#FFF06A;   /* primary highlights and data */
-  --lime-electric:#B8F77D;   /* semantic success/correct action */
+  --white:      #FAF9FA;   /* text on dark, bright highlights     */
+  --cream:      #F4ECD6;   /* warm background (light mode)        */
 
-  /* ACCENT COLORS */
-  --pink-hot:     #F4A9D5;   /* secondary actions / buttons */
-  --grape:        #A875F2;   /* decorative elements only */
+  --ink:        #0A080B;   /* near-black — outlines, dark text    */
+  --dark-1:     #312B32;   /* app background                      */
+  --dark-2:     #524B65;   /* card / panel background             */
+  --dark-3:     #78738E;   /* borders, dividers                   */
+  --dark-4:     #A9A3AF;   /* muted text, placeholders            */
+  --olive:      #676937;   /* shadow / depth accent               */
 
-  /* ── NEUTRALS ─────────────────────────────────────────────── */
+  /* ── Semantic roles ────────────────────────────────────────── */
+  --bg:             var(--dark-1);       /* page background            */
+  --surface:        var(--dark-2);       /* card / panel surface       */
+  --surface-raised: #3d3550;             /* elevated panel             */
+  --border:         var(--dark-3);       /* default border             */
+  --border-focus:   var(--blue);         /* focus ring                 */
+  --border-active:  var(--yellow);       /* active / selected border   */
 
-  --white:        #FFFDFE;
-  --ink:          #0A080B;   /* Heavy illustration-style outline */
+  --text-primary:   var(--white);        /* body text                  */
+  --text-secondary: var(--dark-4);       /* secondary / muted text     */
+  --text-tertiary:  #6b6478;             /* very muted — hints         */
+  --text-on-yellow: var(--ink);          /* text on yellow buttons     */
+  --text-on-lime:   var(--ink);          /* text on correct state      */
 
-  /* ── SEMANTIC ROLES ───────────────────────────────────────── */
+  --cta:            var(--yellow);       /* primary action button      */
+  --cta-hover:      #fcf58a;             /* primary button hover       */
+  --cta-text:       var(--ink);
 
-  --bg:             var(--pink-pastel); /* Now a light pink base */
-  --surface:        var(--blue-baby);   /* Light blue cards */
-  --surface-raised: var(--white);
+  --correct:        var(--lime);         /* correct answer             */
+  --correct-glow:   rgba(178,244,123,.35);
+  --wrong:          var(--pink-deep);    /* wrong answer               */
+  --wrong-bg:       rgba(228,143,204,.12);
+  --wrong-border:   rgba(228,143,204,.4);
 
-  --border:         var(--ink);         /* Heavy, constant outlines */
-  --border-focus:   var(--pink-hot);
+  --streak-active:  var(--yellow-mid);
+  --streak-inactive: rgba(82,75,101,.5);
 
-  /* ── TEXT ─────────────────────────────────────────────────── */
+  --toggle-on:      var(--blue);
+  --toggle-off:     rgba(82,75,101,.6);
+  --toggle-thumb:   var(--ink);
 
-  --text-primary:   var(--ink);         /* Flipped to dark text */
-  --text-secondary: #514565;
-  
-  /* Data highlights (e.g., "83%") */
-  --text-highlight: var(--yellow-bright); 
+  --stage-done:     var(--lavender);
+  --stage-current:  rgba(192,178,245,.5);
+  --stage-future:   rgba(82,75,101,.4);
 
-  /* ── PRIMARY ACTIONS ──────────────────────────────────────── */
+  --select-bg:      var(--dark-1);
+  --select-border:  var(--dark-3);
 
-  --cta:               var(--pink-hot);    /* Pink is main action now */
-  --cta-text:          var(--ink);
-
-  /* ── CORRECT / INCORRECT ──────────────────────────────────── */
-
-  --correct:        var(--lime-electric);
-  --wrong:          var(--pink-hot);
-
+  /* ── Shadows / glows ───────────────────────────────────────── */
+  --shadow-cta:     0 4px 16px rgba(250,242,112,.3);
+  --shadow-correct: 0 0 14px rgba(178,244,123,.4);
+  --glow-blue:      0 0 12px rgba(117,152,240,.3);
 }
