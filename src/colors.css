@@ -1,140 +1,54 @@
 /* ═══════════════════════════════════════════════════════════════
-   EAR TRAINER — DESIGN TOKEN SYSTEM
-   Candy / neon-pastel / Y2K energy
-   Bright yellow + pastel pink + electric lime
-   with deep purple-black structure and heavy outlines.
+   EAR TRAINER — REDESIGN TOKEN SYSTEM
+   Updated: Pastel-dominant / Y2K energy
+   Predominant pink & blue with yellow and lime accents
+   Maintains heavy outlines and illustrative style.
    ═══════════════════════════════════════════════════════════════ */
 
 :root {
 
-  /* ── CORE PALETTE ─────────────────────────────────────────── */
+  /* ── CORE PALETTE ────────────────────────────────────────── */
 
-  /* HERO COLORS — these should dominate the interface */
-  --yellow:       #FFF06A;   /* bright candy yellow */
-  --pink:         #F4A9D5;   /* soft pastel pink */
-  --lime:         #B8F77D;   /* bright pastel lime */
-  --lavender:     #C8B9FA;   /* candy lavender */
+  /* HERO COLORS — Redistributed dominance */
+  --pink-pastel:  #FBD3E9;   /* dominant background/surfaces */
+  --blue-baby:    #A3E1F4;   /* dominant cards/surfaces */
+  --yellow-bright:#FFF06A;   /* primary highlights and data */
+  --lime-electric:#B8F77D;   /* semantic success/correct action */
 
-  /* COOL COLORS */
-  --blue:         #7598F0;   /* periwinkle blue */
-  --sky:          #8CC8F5;   /* bright sky blue */
-  --aqua:         #A8EEF0;   /* candy aqua */
-
-  /* DEEPER ACCENTS */
-  --pink-deep:    #DF7FC2;   /* saturated pink */
-  --purple-deep:  #8E78D1;   /* stronger lavender */
-  --green:        #78D96A;   /* saturated green */
-
-  /* WARM ACCENTS */
-  --peach:        #F2A875;   /* warm candy peach */
-  --yellow-mid:   #E8D65F;   /* yellow shadow / secondary */
+  /* ACCENT COLORS */
+  --pink-hot:     #F4A9D5;   /* secondary actions / buttons */
+  --grape:        #A875F2;   /* decorative elements only */
 
   /* ── NEUTRALS ─────────────────────────────────────────────── */
 
   --white:        #FFFDFE;
-  --cream:        #FFF8E7;
-
-  /* Heavy illustration-style outline */
-  --ink:          #0A080B;
-
-  /* Purple-tinted dark foundation */
-  --dark-1:       #211A2B;
-  --dark-2:       #302641;
-  --dark-3:       #514565;
-  --dark-4:       #8F849F;
+  --ink:          #0A080B;   /* Heavy illustration-style outline */
 
   /* ── SEMANTIC ROLES ───────────────────────────────────────── */
 
-  --bg:             var(--dark-1);
-  --surface:        var(--dark-2);
-  --surface-raised: #3C3150;
+  --bg:             var(--pink-pastel); /* Now a light pink base */
+  --surface:        var(--blue-baby);   /* Light blue cards */
+  --surface-raised: var(--white);
 
-  --border:         var(--dark-3);
-  --border-focus:   var(--blue);
-  --border-active:  var(--yellow);
+  --border:         var(--ink);         /* Heavy, constant outlines */
+  --border-focus:   var(--pink-hot);
 
   /* ── TEXT ─────────────────────────────────────────────────── */
 
-  --text-primary:   var(--white);
-  --text-secondary: #C9C0D4;
-  --text-tertiary:  #9488A4;
-
-  --text-on-yellow: var(--ink);
-  --text-on-lime:   var(--ink);
-  --text-on-pink:   var(--ink);
+  --text-primary:   var(--ink);         /* Flipped to dark text */
+  --text-secondary: #514565;
+  
+  /* Data highlights (e.g., "83%") */
+  --text-highlight: var(--yellow-bright); 
 
   /* ── PRIMARY ACTIONS ──────────────────────────────────────── */
 
-  --cta:               var(--yellow);
-  --cta-hover:         #FFF58C;
-  --cta-active:        #FFE94D;
+  --cta:               var(--pink-hot);    /* Pink is main action now */
   --cta-text:          var(--ink);
-
-  /* Pink secondary action */
-  --cta-secondary:       var(--pink);
-  --cta-secondary-hover: #F8BDE0;
-  --cta-secondary-text:  var(--ink);
 
   /* ── CORRECT / INCORRECT ──────────────────────────────────── */
 
-  /* Correct = bright lime */
-  --correct:        var(--lime);
-  --correct-hover:  #C7FA99;
-  --correct-glow:   rgba(184, 247, 125, 0.45);
+  --correct:        var(--lime-electric);
+  --wrong:          var(--pink-hot);
 
-  /* Wrong = candy pink */
-  --wrong:          var(--pink-deep);
-  --wrong-bg:       rgba(223, 127, 194, 0.16);
-  --wrong-border:   rgba(223, 127, 194, 0.55);
-
-  /* ── STREAK ───────────────────────────────────────────────── */
-
-  --streak-active:    var(--yellow);
-  --streak-highlight: var(--pink);
-  --streak-success:   var(--lime);
-  --streak-inactive:  rgba(81, 69, 101, 0.55);
-
-  /* ── TOGGLES ──────────────────────────────────────────────── */
-
-  --toggle-on:       var(--lime);
-  --toggle-off:      rgba(81, 69, 101, 0.65);
-  --toggle-thumb:    var(--ink);
-
-  /* ── STAGE / PROGRESS ─────────────────────────────────────── */
-
-  --stage-done:      var(--lime);
-  --stage-current:   var(--yellow);
-  --stage-future:    rgba(81, 69, 101, 0.45);
-
-  /* Optional decorative stage colors */
-  --stage-pink:      var(--pink);
-  --stage-blue:      var(--blue);
-  --stage-lavender:  var(--lavender);
-
-  /* ── SELECTIONS ───────────────────────────────────────────── */
-
-  --select-bg:       var(--dark-1);
-  --select-border:   var(--dark-3);
-  --select-focus:    var(--yellow);
-
-  /* ── DECORATIVE ACCENTS ───────────────────────────────────── */
-
-  --accent-pink:     var(--pink);
-  --accent-lime:     var(--lime);
-  --accent-yellow:   var(--yellow);
-  --accent-lavender: var(--lavender);
-  --accent-aqua:     var(--aqua);
-  --accent-sky:      var(--sky);
-  --accent-peach:    var(--peach);
-
-  /* ── SHADOWS / GLOWS ───────────────────────────────────────── */
-
-  --shadow-cta:       0 4px 18px rgba(255, 240, 106, 0.35);
-  --shadow-pink:      0 4px 18px rgba(244, 169, 213, 0.30);
-  --shadow-correct:   0 0 18px rgba(184, 247, 125, 0.45);
-
-  --glow-yellow:      0 0 16px rgba(255, 240, 106, 0.35);
-  --glow-pink:        0 0 16px rgba(244, 169, 213, 0.30);
-  --glow-lime:        0 0 16px rgba(184, 247, 125, 0.35);
-  --glow-blue:        0 0 14px rgba(117, 152, 240, 0.30);
 }
