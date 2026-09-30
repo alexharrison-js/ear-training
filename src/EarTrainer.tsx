@@ -385,13 +385,19 @@ function useAudioEngine(){
    UI PRIMITIVES
    ═══════════════════════════════════════════════════════════════ */
 
+/* ── Palette-aware primitive components ─────────────────────────
+   All colors reference CSS variables from colors.css.
+   Tailwind is used only for layout / spacing utilities.
+   ──────────────────────────────────────────────────────────────── */
+
 function Select({label,value,onChange,options}){
   return(
     <div className="flex flex-col gap-1">
-      <span className="text-[9px] uppercase tracking-[0.18em] text-amber-200/45 font-medium">{label}</span>
+      {label&&<span style={{color:"var(--text-secondary)",fontSize:9,letterSpacing:"0.18em",textTransform:"uppercase",fontWeight:500}}>{label}</span>}
       <select value={value} onChange={e=>onChange(e.target.value)}
-        className="bg-[#1a1410] border border-amber-900/40 text-amber-50 text-xs rounded-md px-2 py-1.5
-                   focus:outline-none focus:ring-1 focus:ring-amber-500/40 cursor-pointer appearance-none">
+        style={{background:"var(--select-bg)",border:"1.5px solid var(--select-border)",color:"var(--text-primary)",borderRadius:8,padding:"5px 8px",fontSize:12,cursor:"pointer",appearance:"none",outline:"none"}}
+        onFocus={e=>e.target.style.borderColor="var(--border-focus)"}
+        onBlur={e=>e.target.style.borderColor="var(--select-border)"}>
         {options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </div>
@@ -402,12 +408,15 @@ function Toggle({label,sub,checked,onChange}){
   return(
     <div className="flex items-center justify-between py-2 px-3">
       <div>
-        <div className="text-xs text-amber-100">{label}</div>
-        {sub&&<div className="text-[10px] text-amber-200/35">{sub}</div>}
+        {label&&<div style={{color:"var(--text-primary)",fontSize:12}}>{label}</div>}
+        {sub&&<div style={{color:"var(--text-tertiary)",fontSize:10}}>{sub}</div>}
       </div>
       <button onClick={()=>onChange(!checked)} role="switch" aria-checked={checked}
-        className={`relative flex-shrink-0 ml-3 w-9 h-5 rounded-full transition-colors duration-200 ${checked?"bg-amber-500":"bg-amber-900/50"}`}>
-        <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#120d0a] transition-transform duration-200 ${checked?"translate-x-4":"translate-x-0"}`}/>
+        style={{position:"relative",flexShrink:0,marginLeft:12,width:36,height:20,borderRadius:10,
+                background:checked?"var(--toggle-on)":"var(--toggle-off)",
+                border:"none",cursor:"pointer",transition:"background 0.2s"}}>
+        <span style={{position:"absolute",top:2,left:checked?18:2,width:16,height:16,borderRadius:"50%",
+                      background:"var(--toggle-thumb)",transition:"left 0.2s"}}/>
       </button>
     </div>
   );
@@ -416,14 +425,16 @@ function Toggle({label,sub,checked,onChange}){
 function Checkbox({label,sub,checked,onChange}){
   return(
     <label className="flex items-start gap-2 cursor-pointer select-none py-0.5" onClick={()=>onChange(!checked)}>
-      <span className={`relative flex-shrink-0 w-3.5 h-3.5 mt-0.5 rounded border transition-colors ${checked?"bg-amber-500 border-amber-500":"bg-transparent border-amber-700/60"}`}>
-        {checked&&<svg className="absolute inset-0 w-full h-full" viewBox="0 0 14 14" fill="none">
-          <polyline points="2.5,7 5.5,10 11.5,4" stroke="#1a1208" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <span style={{position:"relative",flexShrink:0,width:14,height:14,marginTop:2,borderRadius:3,
+                    border:`1.5px solid ${checked?"var(--blue)":"var(--dark-3)"}`,
+                    background:checked?"var(--blue)":"transparent",transition:"all 0.15s",display:"inline-block"}}>
+        {checked&&<svg style={{position:"absolute",inset:0,width:"100%",height:"100%"}} viewBox="0 0 14 14" fill="none">
+          <polyline points="2.5,7 5.5,10 11.5,4" stroke="var(--ink)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>}
       </span>
       <div>
-        <span className="text-xs text-amber-100">{label}</span>
-        {sub&&<div className="text-[10px] text-amber-200/35">{sub}</div>}
+        <span style={{color:"var(--text-primary)",fontSize:12}}>{label}</span>
+        {sub&&<div style={{color:"var(--text-tertiary)",fontSize:10,marginTop:1}}>{sub}</div>}
       </div>
     </label>
   );
@@ -434,12 +445,24 @@ function ConfirmButton({label,confirmLabel="Are you sure?",onConfirm,className="
   if(asking) return(
     <div className="flex gap-1">
       <button onClick={()=>{onConfirm();setAsking(false);}}
-        className="flex-1 py-1 rounded text-[10px] bg-red-900/50 text-red-300 hover:bg-red-900/70">{confirmLabel}</button>
+        style={{flex:1,padding:"4px 8px",borderRadius:6,fontSize:10,background:"var(--wrong-bg)",
+                color:"var(--wrong)",border:"1px solid var(--wrong-border)",cursor:"pointer"}}>
+        {confirmLabel}
+      </button>
       <button onClick={()=>setAsking(false)}
-        className="px-2 py-1 rounded text-[10px] border border-amber-900/40 text-amber-200/50 hover:bg-amber-900/20">Cancel</button>
+        style={{padding:"4px 8px",borderRadius:6,fontSize:10,background:"transparent",
+                color:"var(--text-secondary)",border:"1px solid var(--border)",cursor:"pointer"}}>
+        Cancel
+      </button>
     </div>
   );
-  return <button onClick={()=>setAsking(true)} className={`text-[10px] text-amber-200/40 hover:text-amber-200/70 transition-colors ${className}`}>{label}</button>;
+  return(
+    <button onClick={()=>setAsking(true)}
+      style={{fontSize:10,color:"var(--text-tertiary)",background:"none",border:"none",cursor:"pointer"}}
+      className={className}>
+      {label}
+    </button>
+  );
 }
 
 /* ─── Shared audio settings panel ──────────────────────────────── */
@@ -453,19 +476,20 @@ function AudioSettingsPanel({audioSettings,updateAudio}){
     if(next.length===0) return;
     updateAudio({enabledInstruments:next});
   };
+  const pct=((masterVolume-0.5)/2.5)*100;
   return(
     <div className="space-y-3">
       {/* Volume */}
       <div>
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35">Volume</span>
-          <span className="text-[10px] text-amber-300/60">{Math.round(masterVolume*100)}%</span>
+          <span style={{fontSize:9,letterSpacing:"0.16em",textTransform:"uppercase",color:"var(--text-tertiary)"}}>Volume</span>
+          <span style={{fontSize:10,color:"var(--yellow)"}}>{Math.round(masterVolume*100)}%</span>
         </div>
         <input type="range" min="0.5" max="3.0" step="0.1" value={masterVolume}
           onChange={e=>updateAudio({masterVolume:Number(e.target.value)})}
           className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-          style={{background:`linear-gradient(to right, rgb(245 158 11 / 0.8) ${((masterVolume-0.5)/2.5)*100}%, rgb(120 53 15 / 0.4) ${((masterVolume-0.5)/2.5)*100}%)`}}/>
-        <div className="flex justify-between text-[9px] text-amber-200/20 mt-0.5">
+          style={{background:`linear-gradient(to right, var(--yellow) ${pct}%, var(--dark-2) ${pct}%)`}}/>
+        <div className="flex justify-between mt-0.5" style={{fontSize:9,color:"var(--text-tertiary)"}}>
           <span>50%</span><span>normal</span><span>300%</span>
         </div>
       </div>
@@ -1788,14 +1812,20 @@ export default function App(){
   ];
 
   return(
-    <div className="min-h-screen w-full bg-[#120d0a] text-amber-50 flex flex-col items-center px-3 pt-3 pb-6"
-      style={{fontFamily:"'Iowan Old Style',Georgia,serif"}}>
+    <div className="min-h-screen w-full flex flex-col items-center px-3 pt-3 pb-6"
+      style={{fontFamily:"'Iowan Old Style',Georgia,serif",background:"var(--bg)",color:"var(--text-primary)"}}>
       <div className="w-full max-w-sm">
-        <div className="flex gap-1 mb-3 bg-[#1a1410] rounded-xl p-1 border border-amber-900/30">
+        {/* Tab bar */}
+        <div className="flex gap-1 mb-3 rounded-xl p-1"
+          style={{background:"var(--surface)",border:"1.5px solid var(--border)"}}>
           {tabs.map(t=>(
             <button key={t.id} onClick={()=>setTab(t.id)}
-              className={`flex-1 py-1.5 rounded-lg text-[10px] font-medium tracking-wide transition-all ${
-                tab===t.id?"bg-amber-500 text-[#1a1208] shadow-sm":"text-amber-200/50 hover:text-amber-200/80"}`}>
+              style={{
+                flex:1,padding:"6px 4px",borderRadius:8,fontSize:10,fontWeight:600,
+                letterSpacing:"0.04em",cursor:"pointer",transition:"all 0.15s",border:"none",
+                background:tab===t.id?"var(--cta)":"transparent",
+                color:tab===t.id?"var(--ink)":"var(--text-secondary)",
+              }}>
               {t.label}
             </button>
           ))}
@@ -1804,7 +1834,100 @@ export default function App(){
         {tab==="ap"&&<AbsolutePitchTab audio={audio}/>}
         {tab==="intervals"&&<IntervalsTab audio={audio}/>}
       </div>
-      <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}`}</style>
+
+      <style>{`
+        @keyframes fadeIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
+
+        /* ── Global color overrides — map old Tailwind amber/red/green to palette ── */
+        /* Backgrounds */
+        .bg-\\[\\#120d0a\\],.bg-\\[\\#1a1410\\],.bg-\\[\\#160f0b\\],.bg-\\[\\#1c140f\\]
+          { background: var(--bg) !important; }
+        .from-\\[\\#1c140f\\] { --tw-gradient-from: var(--surface) !important; }
+        .to-\\[\\#160f0b\\]   { --tw-gradient-to:   var(--bg)      !important; }
+
+        /* Text */
+        .text-amber-50,.text-amber-100 { color: var(--text-primary)   !important; }
+        .text-amber-200\\/40,.text-amber-200\\/45,.text-amber-200\\/50
+                                        { color: var(--text-secondary) !important; }
+        .text-amber-200\\/25,.text-amber-200\\/30,.text-amber-200\\/35,.text-amber-200\\/20
+                                        { color: var(--text-tertiary)  !important; }
+        .text-amber-300,.text-amber-300\\/50,.text-amber-300\\/60
+                                        { color: var(--yellow)         !important; }
+        .text-amber-400,.text-amber-400\\/45,.text-amber-400\\/50,.text-amber-400\\/55,.text-amber-400\\/60
+                                        { color: var(--lavender)       !important; }
+        .text-amber-500\\/40,.text-amber-500\\/50,.text-amber-500\\/60,.text-amber-500\\/70
+                                        { color: var(--aqua)           !important; }
+        .text-green-400                 { color: var(--lime)           !important; }
+        .text-red-400                   { color: var(--wrong)          !important; }
+        .text-red-300,.text-red-300\\/60{ color: var(--pink)           !important; }
+        .text-\\[\\#1a1208\\]           { color: var(--ink)            !important; }
+
+        /* Borders */
+        .border-amber-900\\/30,.border-amber-900\\/40,.border-amber-900\\/20
+                                        { border-color: var(--border)       !important; }
+        .border-amber-500\\/40,.border-amber-800\\/30
+                                        { border-color: var(--blue)         !important; }
+        .border-amber-700\\/60          { border-color: var(--dark-3)        !important; }
+        .border-red-800\\/40,.border-red-900\\/30
+                                        { border-color: var(--wrong-border) !important; }
+
+        /* Button backgrounds */
+        .bg-amber-500,.bg-amber-500\\/60{ background: var(--cta)         !important; }
+        .bg-amber-400                   { background: var(--cta-hover)   !important; }
+        .bg-amber-600\\/90,.bg-amber-600{ background: var(--blue)        !important; color: var(--ink) !important; }
+        .bg-amber-900\\/20,.bg-amber-900\\/40,.bg-amber-900\\/50
+                                        { background: var(--surface)     !important; }
+        .bg-amber-950\\/30,.bg-amber-950\\/40
+                                        { background: rgba(50,43,62,0.6) !important; }
+        .bg-amber-500\\/10              { background: rgba(250,242,112,0.08) !important; }
+        .bg-\\[\\#1a1410\\]             { background: var(--surface)     !important; }
+        .bg-green-600                   { background: var(--lime)        !important; }
+        .bg-green-500                   { background: var(--green)       !important; }
+        .bg-red-900\\/40,.bg-red-900\\/30,.bg-red-900\\/50
+                                        { background: var(--wrong-bg)   !important; }
+
+        /* Hover states */
+        .hover\\:bg-amber-400:hover      { background: var(--cta-hover)  !important; }
+        .hover\\:bg-amber-500:hover      { background: var(--cta)        !important; color: var(--ink) !important; }
+        .hover\\:bg-amber-900\\/20:hover { background: rgba(82,75,101,0.25) !important; }
+        .hover\\:bg-amber-500\\/10:hover { background: rgba(250,242,112,0.1) !important; }
+        .hover\\:bg-green-500:hover      { background: var(--green)      !important; }
+        .hover\\:bg-red-900\\/60:hover   { background: rgba(228,143,204,0.2) !important; }
+        .hover\\:border-amber-500\\/50:hover { border-color: var(--blue) !important; }
+        .hover\\:text-amber-200\\/80:hover,.hover\\:text-amber-200\\/60:hover,
+        .hover\\:text-amber-300:hover    { color: var(--lavender)        !important; }
+        .hover\\:text-amber-200\\/50:hover,.hover\\:text-amber-200\\/55:hover
+                                        { color: var(--text-secondary)  !important; }
+        .hover\\:text-amber-400:hover    { color: var(--yellow)          !important; }
+
+        /* Streak dots */
+        .bg-amber-400   { background: var(--streak-active)   !important; }
+        .bg-amber-900\\/50 { background: var(--streak-inactive) !important; }
+
+        /* Stage progress bar segments */
+        .bg-amber-500\\/60 { background: var(--stage-current) !important; }
+        .bg-amber-900\\/40 { background: var(--stage-future)  !important; }
+
+        /* Focus ring */
+        .focus\\:ring-amber-500\\/40:focus { --tw-ring-color: var(--blue) !important; }
+
+        /* Shadow */
+        .shadow-\\[0_3px_10px_rgba\\(245\\,158\\,11\\,0\\.25\\)\\],
+        .shadow-\\[0_4px_16px_rgba\\(250\\,242\\,112\\,0\\.3\\)\\]
+                                        { box-shadow: var(--shadow-cta)     !important; }
+        .shadow-\\[0_0_12px_rgba\\(34\\,197\\,94\\,0\\.4\\)\\],
+        .shadow-\\[0_0_14px_rgba\\(178\\,244\\,123\\,0\\.4\\)\\],
+        .shadow-\\[0_0_10px_rgba\\(34\\,197\\,94\\,0\\.4\\)\\]
+                                        { box-shadow: var(--shadow-correct)  !important; }
+        .shadow-\\[inset_0_1px_0_rgba\\(255\\,255\\,255\\,0\\.03\\)\\]
+                                        { box-shadow: inset 0 1px 0 rgba(255,255,255,0.04) !important; }
+
+        /* Dividers */
+        .divide-amber-900\\/30>*+* { border-color: var(--border) !important; }
+
+        /* Select option background fix */
+        option { background: var(--dark-1); color: var(--text-primary); }
+      `}</style>
     </div>
   );
 }
