@@ -1,4 +1,9 @@
-/* Add this block to your main index.css / App.css file */
+/* ═══════════════════════════════════════════════════════════════
+   EAR TRAINER — DESIGN TOKEN SYSTEM
+   Candy / neon-pastel palette with near-black outlines.
+   All UI colors reference these variables — never hardcode.
+   ═══════════════════════════════════════════════════════════════ */
+
 :root {
   /* ── Core palette ──────────────────────────────────────────── */
   --yellow:     #FAF270;   /* primary — CTA buttons, active state */
@@ -66,4 +71,11 @@
   --shadow-cta:     0 4px 16px rgba(250,242,112,.3);
   --shadow-correct: 0 0 14px rgba(178,244,123,.4);
   --glow-blue:      0 0 12px rgba(117,152,240,.3);
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text-primary);
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
