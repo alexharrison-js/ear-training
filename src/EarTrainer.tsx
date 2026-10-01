@@ -385,19 +385,38 @@ function useAudioEngine(){
    UI PRIMITIVES
    ═══════════════════════════════════════════════════════════════ */
 
-/* ── Palette-aware primitive components ─────────────────────────
-   All colors reference CSS variables from colors.css.
-   Tailwind is used only for layout / spacing utilities.
+/* ── UI PRIMITIVES — Y2K illustrated style ──────────────────────
+   Heavy ink outlines, pastel fills, offset drop-shadows.
+   Every interactive element looks like a sticker or stamp.
    ──────────────────────────────────────────────────────────────── */
+
+// Shared outline-card style
+const card=(extra={})=>({
+  background:"var(--card-bg)",
+  border:"var(--border-width) solid var(--border)",
+  borderRadius:"var(--border-radius)",
+  boxShadow:"var(--shadow-card)",
+  ...extra,
+});
+
+const pill=(bg="var(--btn-default)",extra={})=>({
+  background:bg,
+  border:"var(--border-width) solid var(--border)",
+  borderRadius:999,
+  boxShadow:"var(--shadow-btn)",
+  cursor:"pointer",
+  ...extra,
+});
 
 function Select({label,value,onChange,options}){
   return(
-    <div className="flex flex-col gap-1">
-      {label&&<span style={{color:"var(--text-secondary)",fontSize:9,letterSpacing:"0.18em",textTransform:"uppercase",fontWeight:500}}>{label}</span>}
+    <div style={{display:"flex",flexDirection:"column",gap:4}}>
+      {label&&<span style={{color:"var(--text-secondary)",fontSize:9,letterSpacing:"0.2em",textTransform:"uppercase",fontWeight:700}}>{label}</span>}
       <select value={value} onChange={e=>onChange(e.target.value)}
-        style={{background:"var(--select-bg)",border:"1.5px solid var(--select-border)",color:"var(--text-primary)",borderRadius:8,padding:"5px 8px",fontSize:12,cursor:"pointer",appearance:"none",outline:"none"}}
-        onFocus={e=>e.target.style.borderColor="var(--border-focus)"}
-        onBlur={e=>e.target.style.borderColor="var(--select-border)"}>
+        style={{background:"var(--select-bg)",border:"2px solid var(--select-border)",
+                color:"var(--select-text)",borderRadius:"var(--border-radius-sm)",
+                padding:"5px 10px",fontSize:12,cursor:"pointer",appearance:"none",
+                outline:"none",fontWeight:600,boxShadow:"2px 2px 0 var(--ink)"}}>
         {options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </div>
@@ -406,17 +425,19 @@ function Select({label,value,onChange,options}){
 
 function Toggle({label,sub,checked,onChange}){
   return(
-    <div className="flex items-center justify-between py-2 px-3">
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px"}}>
       <div>
-        {label&&<div style={{color:"var(--text-primary)",fontSize:12}}>{label}</div>}
-        {sub&&<div style={{color:"var(--text-tertiary)",fontSize:10}}>{sub}</div>}
+        {label&&<div style={{color:"var(--text-primary)",fontSize:12,fontWeight:600}}>{label}</div>}
+        {sub&&<div style={{color:"var(--text-muted)",fontSize:10,marginTop:1}}>{sub}</div>}
       </div>
       <button onClick={()=>onChange(!checked)} role="switch" aria-checked={checked}
-        style={{position:"relative",flexShrink:0,marginLeft:12,width:36,height:20,borderRadius:10,
+        style={{position:"relative",flexShrink:0,marginLeft:12,width:40,height:22,
+                borderRadius:11,border:"2px solid var(--ink)",cursor:"pointer",
                 background:checked?"var(--toggle-on)":"var(--toggle-off)",
-                border:"none",cursor:"pointer",transition:"background 0.2s"}}>
-        <span style={{position:"absolute",top:2,left:checked?18:2,width:16,height:16,borderRadius:"50%",
-                      background:"var(--toggle-thumb)",transition:"left 0.2s"}}/>
+                boxShadow:"2px 2px 0 var(--ink)",transition:"background 0.15s"}}>
+        <span style={{position:"absolute",top:2,left:checked?20:2,width:14,height:14,
+                      borderRadius:"50%",background:"var(--white)",border:"1.5px solid var(--ink)",
+                      transition:"left 0.15s"}}/>
       </button>
     </div>
   );
@@ -424,17 +445,20 @@ function Toggle({label,sub,checked,onChange}){
 
 function Checkbox({label,sub,checked,onChange}){
   return(
-    <label className="flex items-start gap-2 cursor-pointer select-none py-0.5" onClick={()=>onChange(!checked)}>
-      <span style={{position:"relative",flexShrink:0,width:14,height:14,marginTop:2,borderRadius:3,
-                    border:`1.5px solid ${checked?"var(--blue)":"var(--dark-3)"}`,
-                    background:checked?"var(--blue)":"transparent",transition:"all 0.15s",display:"inline-block"}}>
-        {checked&&<svg style={{position:"absolute",inset:0,width:"100%",height:"100%"}} viewBox="0 0 14 14" fill="none">
-          <polyline points="2.5,7 5.5,10 11.5,4" stroke="var(--ink)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+    <label style={{display:"flex",alignItems:"flex-start",gap:8,cursor:"pointer",userSelect:"none",padding:"3px 0"}}
+      onClick={()=>onChange(!checked)}>
+      <span style={{position:"relative",flexShrink:0,width:16,height:16,marginTop:1,
+                    borderRadius:4,border:"2px solid var(--ink)",
+                    background:checked?"var(--lime-electric)":"var(--white)",
+                    boxShadow:"1.5px 1.5px 0 var(--ink)",
+                    display:"flex",alignItems:"center",justifyContent:"center",transition:"background 0.1s"}}>
+        {checked&&<svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+          <polyline points="1.5,5 4,7.5 8.5,2" stroke="var(--ink)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>}
       </span>
       <div>
-        <span style={{color:"var(--text-primary)",fontSize:12}}>{label}</span>
-        {sub&&<div style={{color:"var(--text-tertiary)",fontSize:10,marginTop:1}}>{sub}</div>}
+        <span style={{color:"var(--text-primary)",fontSize:12,fontWeight:500}}>{label}</span>
+        {sub&&<div style={{color:"var(--text-muted)",fontSize:10,marginTop:1}}>{sub}</div>}
       </div>
     </label>
   );
@@ -443,22 +467,25 @@ function Checkbox({label,sub,checked,onChange}){
 function ConfirmButton({label,confirmLabel="Are you sure?",onConfirm,className=""}){
   const [asking,setAsking]=useState(false);
   if(asking) return(
-    <div className="flex gap-1">
+    <div style={{display:"flex",gap:4}}>
       <button onClick={()=>{onConfirm();setAsking(false);}}
-        style={{flex:1,padding:"4px 8px",borderRadius:6,fontSize:10,background:"var(--wrong-bg)",
-                color:"var(--wrong)",border:"1px solid var(--wrong-border)",cursor:"pointer"}}>
+        style={{flex:1,padding:"4px 10px",borderRadius:8,fontSize:10,fontWeight:700,
+                background:"var(--wrong)",color:"var(--ink)",
+                border:"2px solid var(--ink)",boxShadow:"2px 2px 0 var(--ink)",cursor:"pointer"}}>
         {confirmLabel}
       </button>
       <button onClick={()=>setAsking(false)}
-        style={{padding:"4px 8px",borderRadius:6,fontSize:10,background:"transparent",
-                color:"var(--text-secondary)",border:"1px solid var(--border)",cursor:"pointer"}}>
+        style={{padding:"4px 10px",borderRadius:8,fontSize:10,fontWeight:600,
+                background:"var(--white)",color:"var(--text-secondary)",
+                border:"2px solid var(--ink)",boxShadow:"2px 2px 0 var(--ink)",cursor:"pointer"}}>
         Cancel
       </button>
     </div>
   );
   return(
     <button onClick={()=>setAsking(true)}
-      style={{fontSize:10,color:"var(--text-tertiary)",background:"none",border:"none",cursor:"pointer"}}
+      style={{fontSize:10,fontWeight:600,color:"var(--text-muted)",background:"none",
+              border:"none",cursor:"pointer",textDecoration:"underline"}}
       className={className}>
       {label}
     </button>
@@ -478,18 +505,19 @@ function AudioSettingsPanel({audioSettings,updateAudio}){
   };
   const pct=((masterVolume-0.5)/2.5)*100;
   return(
-    <div className="space-y-3">
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
       {/* Volume */}
       <div>
-        <div className="flex items-center justify-between mb-1">
-          <span style={{fontSize:9,letterSpacing:"0.16em",textTransform:"uppercase",color:"var(--text-tertiary)"}}>Volume</span>
-          <span style={{fontSize:10,color:"var(--yellow)"}}>{Math.round(masterVolume*100)}%</span>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+          <span style={{fontSize:9,letterSpacing:"0.2em",textTransform:"uppercase",fontWeight:700,color:"var(--text-secondary)"}}>Volume</span>
+          <span style={{fontSize:11,fontWeight:700,color:"var(--text-primary)"}}>{Math.round(masterVolume*100)}%</span>
         </div>
         <input type="range" min="0.5" max="3.0" step="0.1" value={masterVolume}
           onChange={e=>updateAudio({masterVolume:Number(e.target.value)})}
-          className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-          style={{background:`linear-gradient(to right, var(--yellow) ${pct}%, var(--dark-2) ${pct}%)`}}/>
-        <div className="flex justify-between mt-0.5" style={{fontSize:9,color:"var(--text-tertiary)"}}>
+          className="w-full cursor-pointer appearance-none"
+          style={{height:6,borderRadius:3,border:"1.5px solid var(--ink)",
+                  background:`linear-gradient(to right, var(--lime-electric) ${pct}%, var(--muted-light) ${pct}%)`}}/>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"var(--text-muted)",marginTop:2}}>
           <span>50%</span><span>normal</span><span>300%</span>
         </div>
       </div>
@@ -1812,121 +1840,179 @@ export default function App(){
   ];
 
   return(
-    <div className="min-h-screen w-full flex flex-col items-center px-3 pt-3 pb-6"
-      style={{fontFamily:"'Iowan Old Style',Georgia,serif",background:"var(--bg)",color:"var(--text-primary)"}}>
+    <div className="min-h-screen w-full flex flex-col items-center px-3 pt-3 pb-8"
+      style={{fontFamily:"'Nunito','Iowan Old Style',Georgia,sans-serif",
+              background:"var(--bg)",color:"var(--text-primary)"}}>
       <div className="w-full max-w-sm">
-        {/* Tab bar */}
-        <div className="flex gap-1 mb-3 rounded-xl p-1"
-          style={{background:"var(--surface)",border:"1.5px solid var(--border)"}}>
+
+        {/* ── TAB BAR — pill buttons with heavy outlines ── */}
+        <div style={{display:"flex",gap:6,marginBottom:12,padding:4,
+                     background:"var(--white)",border:"2px solid var(--ink)",
+                     borderRadius:999,boxShadow:"3px 3px 0 var(--ink)"}}>
           {tabs.map(t=>(
             <button key={t.id} onClick={()=>setTab(t.id)}
-              style={{
-                flex:1,padding:"6px 4px",borderRadius:8,fontSize:10,fontWeight:600,
-                letterSpacing:"0.04em",cursor:"pointer",transition:"all 0.15s",border:"none",
-                background:tab===t.id?"var(--cta)":"transparent",
-                color:tab===t.id?"var(--ink)":"var(--text-secondary)",
-              }}>
+              style={{flex:1,padding:"7px 4px",borderRadius:999,fontSize:10,fontWeight:800,
+                      letterSpacing:"0.03em",cursor:"pointer",transition:"all 0.12s",
+                      border:tab===t.id?"2px solid var(--ink)":"2px solid transparent",
+                      background:tab===t.id?"var(--tab-active-bg)":"transparent",
+                      color:tab===t.id?"var(--ink)":"var(--tab-inactive-text)",
+                      boxShadow:tab===t.id?"2px 2px 0 var(--ink)":"none"}}>
               {t.label}
             </button>
           ))}
         </div>
+
         {tab==="chord"&&<ChordToneTab audio={audio}/>}
         {tab==="ap"&&<AbsolutePitchTab audio={audio}/>}
         {tab==="intervals"&&<IntervalsTab audio={audio}/>}
       </div>
 
       <style>{`
-        @keyframes fadeIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
 
-        /* ── Global color overrides — map old Tailwind amber/red/green to palette ── */
-        /* Backgrounds */
+        /* ── Base resets ── */
+        * { box-sizing: border-box; }
+        button { font-family: inherit; }
+        select { font-family: inherit; }
+        option { background: var(--white); color: var(--ink); }
+
+        /* ── Remap every Tailwind dark/amber class to the new palette ── */
+
+        /* Page & card backgrounds */
         .bg-\\[\\#120d0a\\],.bg-\\[\\#1a1410\\],.bg-\\[\\#160f0b\\],.bg-\\[\\#1c140f\\]
-          { background: var(--bg) !important; }
-        .from-\\[\\#1c140f\\] { --tw-gradient-from: var(--surface) !important; }
-        .to-\\[\\#160f0b\\]   { --tw-gradient-to:   var(--bg)      !important; }
+          { background: var(--surface) !important; }
+        .from-\\[\\#1c140f\\] { --tw-gradient-from: var(--card-bg) !important; }
+        .to-\\[\\#160f0b\\]   { --tw-gradient-to:   var(--card-bg) !important; }
+        .bg-gradient-to-b    { background: var(--card-bg) !important; }
+
+        /* All rounded card panels */
+        .rounded-2xl,.rounded-xl {
+          background: var(--card-bg);
+          border: 2px solid var(--ink) !important;
+          box-shadow: var(--shadow-card) !important;
+        }
+        /* Focus panel (practice focus / stage banner) uses blue-baby */
+        .border-amber-500\\/20 {
+          background: var(--card-alt-bg) !important;
+          border-color: var(--ink) !important;
+        }
+        /* Collapsible settings panels */
+        .overflow-hidden.rounded-xl {
+          background: var(--card-bg) !important;
+        }
 
         /* Text */
-        .text-amber-50,.text-amber-100 { color: var(--text-primary)   !important; }
+        .text-amber-50,.text-amber-100,
+        .text-amber-200\\/60,.text-amber-200\\/80
+                              { color: var(--text-primary)   !important; }
         .text-amber-200\\/40,.text-amber-200\\/45,.text-amber-200\\/50
-                                        { color: var(--text-secondary) !important; }
+                              { color: var(--text-secondary)  !important; }
         .text-amber-200\\/25,.text-amber-200\\/30,.text-amber-200\\/35,.text-amber-200\\/20
-                                        { color: var(--text-tertiary)  !important; }
-        .text-amber-300,.text-amber-300\\/50,.text-amber-300\\/60
-                                        { color: var(--yellow)         !important; }
-        .text-amber-400,.text-amber-400\\/45,.text-amber-400\\/50,.text-amber-400\\/55,.text-amber-400\\/60
-                                        { color: var(--lavender)       !important; }
+                              { color: var(--text-muted)      !important; }
+        .text-amber-300       { color: var(--text-primary)    !important; font-weight: 700; }
+        .text-amber-300\\/50,.text-amber-300\\/60
+                              { color: var(--text-secondary)  !important; }
+        .text-amber-400,.text-amber-400\\/45,.text-amber-400\\/50,
+        .text-amber-400\\/55,.text-amber-400\\/60
+                              { color: var(--text-secondary)  !important; font-weight:700; text-transform:uppercase; }
         .text-amber-500\\/40,.text-amber-500\\/50,.text-amber-500\\/60,.text-amber-500\\/70
-                                        { color: var(--aqua)           !important; }
-        .text-green-400                 { color: var(--lime)           !important; }
-        .text-red-400                   { color: var(--wrong)          !important; }
-        .text-red-300,.text-red-300\\/60{ color: var(--pink)           !important; }
-        .text-\\[\\#1a1208\\]           { color: var(--ink)            !important; }
+                              { color: var(--text-muted)      !important; }
+        .text-green-400       { color: var(--ink)             !important; }
+        .text-red-400         { color: var(--ink)             !important; }
+        .text-red-300,.text-red-300\\/60
+                              { color: var(--ink)             !important; }
+        .text-\\[\\#1a1208\\] { color: var(--ink)             !important; }
+        .text-amber-100       { color: var(--text-primary)    !important; }
 
         /* Borders */
-        .border-amber-900\\/30,.border-amber-900\\/40,.border-amber-900\\/20
-                                        { border-color: var(--border)       !important; }
-        .border-amber-500\\/40,.border-amber-800\\/30
-                                        { border-color: var(--blue)         !important; }
-        .border-amber-700\\/60          { border-color: var(--dark-3)        !important; }
-        .border-red-800\\/40,.border-red-900\\/30
-                                        { border-color: var(--wrong-border) !important; }
+        .border-amber-900\\/30,.border-amber-900\\/40,.border-amber-900\\/20,
+        .border-amber-800\\/30,.border-amber-500\\/40
+                              { border-color: var(--ink) !important; }
+        .border-amber-700\\/60,.border-red-800\\/40,.border-red-900\\/30
+                              { border-color: var(--ink) !important; }
+        .border-red-900\\/30  { border-color: var(--ink) !important; }
 
-        /* Button backgrounds */
-        .bg-amber-500,.bg-amber-500\\/60{ background: var(--cta)         !important; }
-        .bg-amber-400                   { background: var(--cta-hover)   !important; }
-        .bg-amber-600\\/90,.bg-amber-600{ background: var(--blue)        !important; color: var(--ink) !important; }
-        .bg-amber-900\\/20,.bg-amber-900\\/40,.bg-amber-900\\/50
-                                        { background: var(--surface)     !important; }
-        .bg-amber-950\\/30,.bg-amber-950\\/40
-                                        { background: rgba(50,43,62,0.6) !important; }
-        .bg-amber-500\\/10              { background: rgba(250,242,112,0.08) !important; }
-        .bg-\\[\\#1a1410\\]             { background: var(--surface)     !important; }
-        .bg-green-600                   { background: var(--lime)        !important; }
-        .bg-green-500                   { background: var(--green)       !important; }
-        .bg-red-900\\/40,.bg-red-900\\/30,.bg-red-900\\/50
-                                        { background: var(--wrong-bg)   !important; }
+        /* Primary CTA buttons (amber-500) → lime */
+        .bg-amber-500         { background: var(--lime-electric) !important; color: var(--ink) !important;
+                                border: 2px solid var(--ink) !important; box-shadow: var(--shadow-btn) !important; }
+        .bg-amber-400         { background: var(--cta-hover) !important; }
+        .hover\\:bg-amber-400:hover { background: var(--cta-hover) !important; }
+        .hover\\:bg-amber-500:hover { background: var(--lime-electric) !important; color: var(--ink) !important; }
 
-        /* Hover states */
-        .hover\\:bg-amber-400:hover      { background: var(--cta-hover)  !important; }
-        .hover\\:bg-amber-500:hover      { background: var(--cta)        !important; color: var(--ink) !important; }
-        .hover\\:bg-amber-900\\/20:hover { background: rgba(82,75,101,0.25) !important; }
-        .hover\\:bg-amber-500\\/10:hover { background: rgba(250,242,112,0.1) !important; }
-        .hover\\:bg-green-500:hover      { background: var(--green)      !important; }
-        .hover\\:bg-red-900\\/60:hover   { background: rgba(228,143,204,0.2) !important; }
-        .hover\\:border-amber-500\\/50:hover { border-color: var(--blue) !important; }
-        .hover\\:text-amber-200\\/80:hover,.hover\\:text-amber-200\\/60:hover,
-        .hover\\:text-amber-300:hover    { color: var(--lavender)        !important; }
-        .hover\\:text-amber-200\\/50:hover,.hover\\:text-amber-200\\/55:hover
-                                        { color: var(--text-secondary)  !important; }
-        .hover\\:text-amber-400:hover    { color: var(--yellow)          !important; }
+        /* Secondary action buttons (amber-600) → pink-hot */
+        .bg-amber-600\\/90,.bg-amber-600
+                              { background: var(--pink-hot) !important; color: var(--ink) !important;
+                                border: 2px solid var(--ink) !important; box-shadow: var(--shadow-btn) !important; }
+        .hover\\:bg-amber-500:hover { background: var(--lime-electric) !important; }
 
-        /* Streak dots */
-        .bg-amber-400   { background: var(--streak-active)   !important; }
-        .bg-amber-900\\/50 { background: var(--streak-inactive) !important; }
+        /* Panel backgrounds */
+        .bg-amber-900\\/20,.bg-amber-900\\/40,.bg-amber-900\\/50,
+        .bg-amber-950\\/30,.bg-amber-950\\/40,.bg-\\[\\#1a1410\\]
+                              { background: var(--surface-raised) !important; }
+        .bg-amber-500\\/10    { background: rgba(244,169,213,0.15) !important; }
 
-        /* Stage progress bar segments */
-        .bg-amber-500\\/60 { background: var(--stage-current) !important; }
-        .bg-amber-900\\/40 { background: var(--stage-future)  !important; }
-
-        /* Focus ring */
-        .focus\\:ring-amber-500\\/40:focus { --tw-ring-color: var(--blue) !important; }
-
-        /* Shadow */
-        .shadow-\\[0_3px_10px_rgba\\(245\\,158\\,11\\,0\\.25\\)\\],
-        .shadow-\\[0_4px_16px_rgba\\(250\\,242\\,112\\,0\\.3\\)\\]
-                                        { box-shadow: var(--shadow-cta)     !important; }
+        /* Correct state → lime */
+        .bg-green-600         { background: var(--lime-electric) !important;
+                                color: var(--ink) !important;
+                                border-color: var(--ink) !important; }
+        .bg-green-500,.hover\\:bg-green-500:hover
+                              { background: var(--lime-electric) !important; color: var(--ink) !important; }
         .shadow-\\[0_0_12px_rgba\\(34\\,197\\,94\\,0\\.4\\)\\],
         .shadow-\\[0_0_14px_rgba\\(178\\,244\\,123\\,0\\.4\\)\\],
         .shadow-\\[0_0_10px_rgba\\(34\\,197\\,94\\,0\\.4\\)\\]
-                                        { box-shadow: var(--shadow-correct)  !important; }
-        .shadow-\\[inset_0_1px_0_rgba\\(255\\,255\\,255\\,0\\.03\\)\\]
-                                        { box-shadow: inset 0 1px 0 rgba(255,255,255,0.04) !important; }
+                              { box-shadow: 0 0 0 3px var(--lime-electric), var(--shadow-btn) !important; }
+
+        /* Wrong state → pink */
+        .bg-red-900\\/40,.bg-red-900\\/30,.bg-red-900\\/50
+                              { background: var(--pink-hot) !important; }
+        .hover\\:bg-red-900\\/60:hover
+                              { background: var(--pink-hot) !important; }
+
+        /* Hover states */
+        .hover\\:bg-amber-900\\/20:hover
+                              { background: var(--surface-raised) !important; }
+        .hover\\:bg-amber-500\\/10:hover
+                              { background: rgba(163,225,244,0.3) !important; }
+        .hover\\:border-amber-500\\/50:hover
+                              { border-color: var(--ink) !important; }
+        .hover\\:text-amber-200\\/80:hover,.hover\\:text-amber-200\\/60:hover,
+        .hover\\:text-amber-300:hover,.hover\\:text-amber-400:hover
+                              { color: var(--grape) !important; }
+        .hover\\:text-amber-200\\/50:hover,.hover\\:text-amber-200\\/55:hover
+                              { color: var(--text-secondary) !important; }
+
+        /* Streak dots */
+        .bg-amber-400         { background: var(--streak-active)   !important; border-radius: 99px; }
+        .bg-amber-900\\/50    { background: var(--streak-inactive)  !important; border-radius: 99px; }
+
+        /* Stage progress dots */
+        .bg-amber-500\\/60    { background: var(--progress-current) !important; }
+        .bg-amber-900\\/40    { background: var(--progress-future)  !important;
+                                border: 1.5px solid var(--muted-light) !important; }
+
+        /* Collapsible toggle arrows & small text */
+        .text-amber-500\\/60  { color: var(--grape) !important; font-weight: 800; }
 
         /* Dividers */
-        .divide-amber-900\\/30>*+* { border-color: var(--border) !important; }
+        .divide-amber-900\\/30>*+* { border-color: var(--muted-light) !important; }
+        .border-t.border-amber-900\\/30,.border-b.border-amber-900\\/30
+                              { border-color: var(--muted-light) !important; }
 
-        /* Select option background fix */
-        option { background: var(--dark-1); color: var(--text-primary); }
+        /* Shadows */
+        .shadow-\\[0_3px_10px_rgba\\(245\\,158\\,11\\,0\\.25\\)\\],
+        .shadow-\\[0_4px_14px_rgba\\(245\\,158\\,11\\,0\\.25\\)\\],
+        .shadow-\\[0_4px_16px_rgba\\(250\\,242\\,112\\,0\\.3\\)\\]
+                              { box-shadow: var(--shadow-cta) !important; }
+        .shadow-\\[inset_0_1px_0_rgba\\(255\\,255\\,255\\,0\\.03\\)\\]
+                              { box-shadow: none !important; }
+
+        /* Active scale stays */
+        .active\\:scale-\\[0\\.98\\]:active { transform: scale(0.98) translate(1px,1px); }
+        .active\\:scale-95:active          { transform: scale(0.95) translate(1px,1px); }
+        .active\\:scale-90:active          { transform: scale(0.90); }
+
+        /* Gradient backgrounds → flat card */
+        .bg-gradient-to-b     { background: var(--card-bg) !important; }
       `}</style>
     </div>
   );
