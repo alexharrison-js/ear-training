@@ -1831,7 +1831,12 @@ function IntervalsTab({audio}){
 export default function App(){
   const audio=useAudioEngine();
   const [tab,setTab]=useState(()=>lsGet(LS_TAB,"ap"));
+  const [theme,setTheme]=useState(()=>lsGet("ear_trainer_theme","light"));
+
   useEffect(()=>lsSet(LS_TAB,tab),[tab]);
+  useEffect(()=>lsSet("ear_trainer_theme",theme),[theme]);
+
+  const toggleTheme=()=>setTheme(t=>t==="light"?"dark":"light");
 
   const tabs=[
     {id:"chord",label:"Chord Tones"},
@@ -1841,25 +1846,42 @@ export default function App(){
 
   return(
     <div className="min-h-screen w-full flex flex-col items-center px-3 pt-3 pb-8"
+      data-theme={theme}
       style={{fontFamily:"'Nunito','Iowan Old Style',Georgia,sans-serif",
               background:"var(--bg)",color:"var(--text-primary)"}}>
       <div className="w-full max-w-sm">
 
-        {/* ── TAB BAR — pill buttons with heavy outlines ── */}
-        <div style={{display:"flex",gap:6,marginBottom:12,padding:4,
-                     background:"var(--white)",border:"2px solid var(--ink)",
-                     borderRadius:999,boxShadow:"3px 3px 0 var(--ink)"}}>
-          {tabs.map(t=>(
-            <button key={t.id} onClick={()=>setTab(t.id)}
-              style={{flex:1,padding:"7px 4px",borderRadius:999,fontSize:10,fontWeight:800,
-                      letterSpacing:"0.03em",cursor:"pointer",transition:"all 0.12s",
-                      border:tab===t.id?"2px solid var(--ink)":"2px solid transparent",
-                      background:tab===t.id?"var(--tab-active-bg)":"transparent",
-                      color:tab===t.id?"var(--ink)":"var(--tab-inactive-text)",
-                      boxShadow:tab===t.id?"2px 2px 0 var(--ink)":"none"}}>
-              {t.label}
-            </button>
-          ))}
+        {/* ── HEADER ROW: tab bar + theme toggle ── */}
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+          {/* Tab bar */}
+          <div style={{flex:1,display:"flex",gap:6,padding:4,
+                       background:"var(--tab-bg)",border:"2px solid var(--ink)",
+                       borderRadius:999,boxShadow:"3px 3px 0 var(--ink)"}}>
+            {tabs.map(t=>(
+              <button key={t.id} onClick={()=>setTab(t.id)}
+                style={{flex:1,padding:"7px 4px",borderRadius:999,fontSize:10,fontWeight:800,
+                        letterSpacing:"0.03em",cursor:"pointer",transition:"all 0.12s",
+                        border:tab===t.id?"2px solid var(--ink)":"2px solid transparent",
+                        background:tab===t.id?"var(--tab-active-bg)":"transparent",
+                        color:tab===t.id?"var(--ink)":"var(--tab-inactive-text)",
+                        boxShadow:tab===t.id?"2px 2px 0 var(--ink)":"none"}}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Theme toggle button */}
+          <button onClick={toggleTheme}
+            title={`Switch to ${theme==="light"?"dark":"light"} theme`}
+            style={{flexShrink:0,width:36,height:36,borderRadius:999,
+                    background:"var(--surface)",border:"2px solid var(--ink)",
+                    boxShadow:"2px 2px 0 var(--ink)",cursor:"pointer",
+                    fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",
+                    transition:"transform 0.15s"}}
+            onMouseDown={e=>e.currentTarget.style.transform="translate(1px,1px)"}
+            onMouseUp={e=>e.currentTarget.style.transform=""}>
+            {theme==="light"?"🌙":"☀️"}
+          </button>
         </div>
 
         {tab==="chord"&&<ChordToneTab audio={audio}/>}
