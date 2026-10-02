@@ -1,11 +1,14 @@
 /* ═══════════════════════════════════════════════════════════════
-   EAR TRAINER — DESIGN TOKEN SYSTEM
-   Y2K candy / illustrated sticker aesthetic.
-   Heavy outlines, pastel fills, lime/yellow/pink accents.
+   EAR TRAINER — DUAL THEME SYSTEM
+   [data-theme="light"] = Y2K candy pastel (pink/blue/lime)
+   [data-theme="dark"]  = Original amber-on-dark (warm dark)
+   Default: light
    ═══════════════════════════════════════════════════════════════ */
 
-:root {
-  /* ── CORE PALETTE ─────────────────────────────────────────── */
+/* ── LIGHT THEME (Y2K candy pastel) ─────────────────────────── */
+:root,
+[data-theme="light"] {
+  /* Core palette */
   --pink-pastel:   #FBD3E9;
   --blue-baby:     #A3E1F4;
   --yellow-bright: #FFF06A;
@@ -15,17 +18,14 @@
   --white:         #FFFDFE;
   --cream:         #FEF8F2;
   --ink:           #0A080B;
-  --ink-soft:      #2A1F2D;
   --muted:         #7B6E82;
   --muted-light:   #C4BAC9;
 
-  /* ── SEMANTIC ROLES ───────────────────────────────────────── */
+  /* Layout */
   --bg:              var(--pink-pastel);
-  --surface:         var(--white);
-  --surface-alt:     var(--blue-baby);
-  --surface-raised:  var(--cream);
-
-  /* All borders use heavy ink outlines — the defining trait */
+  --surface:         var(--blue-baby);
+  --surface-alt:     #c8edf7;
+  --surface-raised:  #d8f1f9;
   --border:          var(--ink);
   --border-width:    2px;
   --border-radius:   12px;
@@ -33,25 +33,23 @@
   --border-radius-lg:18px;
   --border-focus:    var(--grape);
 
-  /* ── TEXT ─────────────────────────────────────────────────── */
-  --text-primary:    var(--ink);
-  --text-secondary:  #514565;
-  --text-muted:      var(--muted);
-  --text-highlight:  var(--ink);       /* on yellow bg */
+  /* Text */
+  --text-primary:    var(--grape);
+  --text-secondary:  #7a50c8;
+  --text-muted:      #a990d8;
+  --text-highlight:  var(--grape);
   --text-on-lime:    var(--ink);
   --text-on-pink:    var(--ink);
-  --text-on-blue:    var(--ink);
+  --text-on-blue:    var(--grape);
 
-  /* ── ACTIONS ──────────────────────────────────────────────── */
+  /* Actions */
   --cta:             var(--lime-electric);
   --cta-hover:       #c9faaa;
   --cta-text:        var(--ink);
-  --cta-border:      var(--ink);
+  --btn-default:     var(--blue-baby);
+  --btn-default-hover: var(--surface-alt);
 
-  --btn-default:     var(--white);
-  --btn-default-hover: var(--cream);
-
-  /* ── SEMANTIC STATES ──────────────────────────────────────── */
+  /* States */
   --correct:         var(--lime-electric);
   --correct-text:    var(--ink);
   --wrong:           var(--pink-hot);
@@ -59,49 +57,136 @@
   --warning:         var(--yellow-bright);
   --warning-text:    var(--ink);
 
-  /* ── TABS ─────────────────────────────────────────────────── */
-  --tab-bg:          var(--white);
-  --tab-active-bg:   var(--pink-hot);
-  --tab-active-text: var(--ink);
-  --tab-inactive-text: var(--muted);
+  /* Tabs */
+  --tab-bg:           var(--white);
+  --tab-active-bg:    var(--pink-hot);
+  --tab-active-text:  var(--ink);
+  --tab-inactive-text:var(--muted);
 
-  /* ── TOGGLES ──────────────────────────────────────────────── */
-  --toggle-on:       var(--lime-electric);
-  --toggle-off:      var(--muted-light);
-  --toggle-thumb:    var(--white);
-  --toggle-border:   var(--ink);
+  /* Toggles */
+  --toggle-on:        var(--lime-electric);
+  --toggle-off:       var(--muted-light);
+  --toggle-thumb:     var(--white);
 
-  /* ── PROGRESS ─────────────────────────────────────────────── */
+  /* Progress */
   --progress-done:    var(--lime-electric);
   --progress-current: var(--yellow-bright);
-  --progress-future:  var(--white);
+  --progress-future:  #b8d8e8;
 
-  /* ── STREAK DOTS ──────────────────────────────────────────── */
-  --streak-active:   var(--yellow-bright);
-  --streak-inactive: var(--muted-light);
+  /* Streak */
+  --streak-active:    var(--yellow-bright);
+  --streak-inactive:  var(--muted-light);
 
-  /* ── ANSWER BUTTONS ───────────────────────────────────────── */
-  --answer-bg:       var(--white);
-  --answer-border:   var(--ink);
-  --answer-text:     var(--ink);
-  --answer-correct:  var(--lime-electric);
-  --answer-wrong:    var(--pink-hot);
-  --answer-disabled: var(--muted-light);
-  --answer-disabled-text: var(--muted);
+  /* Cards & surfaces */
+  --card-bg:          var(--blue-baby);
+  --card-alt-bg:      var(--surface-alt);
+  --select-bg:        var(--blue-baby);
+  --select-border:    var(--ink);
+  --select-text:      var(--grape);
 
-  /* ── STAGE / INFO CARDS ───────────────────────────────────── */
-  --card-bg:         var(--white);
-  --card-border:     var(--ink);
-  --card-alt-bg:     var(--blue-baby);
+  /* Answer buttons */
+  --answer-bg:        var(--blue-baby);
+  --answer-text:      var(--grape);
+  --answer-correct:   var(--lime-electric);
+  --answer-wrong:     var(--pink-hot);
+  --answer-disabled:  #b8d8e8;
+  --answer-disabled-text: var(--text-muted);
 
-  /* ── SELECT ───────────────────────────────────────────────── */
-  --select-bg:       var(--white);
-  --select-border:   var(--ink);
-  --select-text:     var(--ink);
+  /* Shadows — hard offset, no blur (sticker effect) */
+  --shadow-card:      3px 3px 0px var(--ink);
+  --shadow-btn:       2px 2px 0px var(--ink);
+  --shadow-btn-hover: 1px 1px 0px var(--ink);
+  --shadow-cta:       3px 3px 0px var(--ink);
+}
 
-  /* ── SHADOWS ──────────────────────────────────────────────── */
-  --shadow-card:     3px 3px 0px var(--ink);
-  --shadow-btn:      2px 2px 0px var(--ink);
-  --shadow-btn-hover:1px 1px 0px var(--ink);
-  --shadow-cta:      3px 3px 0px var(--ink);
+/* ── DARK THEME (original amber-on-dark) ─────────────────────── */
+[data-theme="dark"] {
+  /* Core palette */
+  --amber-400:     #f59e0b;
+  --amber-500:     #f59e0b;
+  --amber-300:     #fcd34d;
+  --amber-200:     #fde68a;
+  --amber-600:     #d97706;
+  --lime-electric: #4ade80;
+  --ink:           #1a1208;
+  --muted:         #78738e;
+  --muted-light:   #524b65;
+  --grape:         #fcd34d;  /* amber plays the accent role */
+
+  /* Layout */
+  --bg:              #120d0a;
+  --surface:         #1a1410;
+  --surface-alt:     #1c140f;
+  --surface-raised:  #221810;
+  --border:          rgba(120,80,20,0.45);
+  --border-width:    1.5px;
+  --border-radius:   14px;
+  --border-radius-sm:8px;
+  --border-radius-lg:20px;
+  --border-focus:    var(--amber-500);
+
+  /* Text */
+  --text-primary:    #fef3c7;
+  --text-secondary:  rgba(253,230,138,0.6);
+  --text-muted:      rgba(253,230,138,0.3);
+  --text-highlight:  var(--amber-300);
+  --text-on-lime:    #120d0a;
+  --text-on-pink:    #120d0a;
+  --text-on-blue:    #120d0a;
+
+  /* Actions */
+  --cta:             var(--amber-500);
+  --cta-hover:       var(--amber-400);
+  --cta-text:        #1a1208;
+  --btn-default:     var(--surface);
+  --btn-default-hover: var(--surface-alt);
+
+  /* States */
+  --correct:         #22c55e;
+  --correct-text:    #120d0a;
+  --wrong:           #e48fcc;
+  --wrong-text:      #120d0a;
+  --warning:         var(--amber-400);
+  --warning-text:    #120d0a;
+
+  /* Tabs */
+  --tab-bg:           var(--surface);
+  --tab-active-bg:    var(--amber-500);
+  --tab-active-text:  #1a1208;
+  --tab-inactive-text:rgba(253,230,138,0.5);
+
+  /* Toggles */
+  --toggle-on:        var(--amber-500);
+  --toggle-off:       rgba(82,75,101,0.6);
+  --toggle-thumb:     #120d0a;
+
+  /* Progress */
+  --progress-done:    var(--amber-400);
+  --progress-current: rgba(245,158,11,0.5);
+  --progress-future:  rgba(82,75,101,0.4);
+
+  /* Streak */
+  --streak-active:    var(--amber-400);
+  --streak-inactive:  rgba(82,75,101,0.5);
+
+  /* Cards & surfaces */
+  --card-bg:          var(--surface-alt);
+  --card-alt-bg:      rgba(50,43,62,0.6);
+  --select-bg:        var(--surface);
+  --select-border:    rgba(120,80,20,0.45);
+  --select-text:      #fef3c7;
+
+  /* Answer buttons */
+  --answer-bg:        var(--surface);
+  --answer-text:      #fef3c7;
+  --answer-correct:   #22c55e;
+  --answer-wrong:     #e48fcc;
+  --answer-disabled:  rgba(82,75,101,0.4);
+  --answer-disabled-text: rgba(253,230,138,0.25);
+
+  /* Shadows — soft glow instead of hard offset */
+  --shadow-card:      0 4px 16px rgba(0,0,0,0.4);
+  --shadow-btn:       0 3px 10px rgba(245,158,11,0.25);
+  --shadow-btn-hover: 0 2px 6px rgba(245,158,11,0.15);
+  --shadow-cta:       0 4px 14px rgba(245,158,11,0.3);
 }
