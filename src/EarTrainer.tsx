@@ -1974,6 +1974,13 @@ function AbsolutePitchTab({ audio }) {
   const [discLastCorrect, setDiscLastCorrect] = useState(null);
   const [discUserGuess, setDiscUserGuess] = useState(null); // note name or "other"
   const [discRunning, setDiscRunning] = useState(false);
+  const [discPlayback, setDiscPlayback] = useState(() =>
+    lsGet("ear_trainer_ap_disc_playback", false),
+  );
+  useEffect(
+    () => lsSet("ear_trainer_ap_disc_playback", discPlayback),
+    [discPlayback],
+  );
   const discTimerRef = useRef(null);
 
   const stopDiscLoop = useCallback(() => {
@@ -2017,13 +2024,17 @@ function AbsolutePitchTab({ audio }) {
       setDiscUserGuess(null);
       if (autoPlay) {
         setDiscRunning(true);
-        discTimerRef.current = setTimeout(
-          () => playNote(midi, { duration: 1.8, gain: 0.24 }),
-          80,
-        );
+        discTimerRef.current = setTimeout(() => {
+          playNote(midi, { duration: 1.2, gain: 0.24 });
+          if (discPlayback) {
+            discTimerRef.current = setTimeout(() => {
+              playNote(midi, { duration: 1.2, gain: 0.24 });
+            }, 1000);
+          }
+        }, 80);
       }
     },
-    [pickOctave, playNote, closeDistractors, discFocusNotes],
+    [pickOctave, playNote, closeDistractors, discFocusNotes, discPlayback],
   );
 
   useEffect(() => {
@@ -2196,6 +2207,26 @@ function AbsolutePitchTab({ audio }) {
                     >
                       <span
                         className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#120d0a] transition-transform duration-200 ${closeDistractors ? "translate-x-4" : "translate-x-0"}`}
+                      />
+                    </button>
+                  </div>
+                  <div className="border-t border-amber-900/30 pt-2 flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs text-amber-100">Play it back</div>
+                      <div className="text-[10px] text-amber-200/30 leading-snug mt-0.5">
+                        Plays note · 1s · plays again · then you answer. Gives
+                        you a second hearing to lock in the chroma before
+                        committing.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setDiscPlayback((p) => !p)}
+                      role="switch"
+                      aria-checked={discPlayback}
+                      className={`relative flex-shrink-0 w-9 h-5 rounded-full transition-colors duration-200 ${discPlayback ? "bg-amber-500" : "bg-amber-900/50"}`}
+                    >
+                      <span
+                        className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#120d0a] transition-transform duration-200 ${discPlayback ? "translate-x-4" : "translate-x-0"}`}
                       />
                     </button>
                   </div>
@@ -2466,10 +2497,17 @@ function AbsolutePitchTab({ audio }) {
           {!autoAdvance && (
             <div className="flex justify-center gap-3">
               <button
-                onClick={() =>
-                  discTrial &&
-                  playNote(discTrial.midi, { duration: 1.8, gain: 0.24 })
-                }
+                onClick={() => {
+                  if (!discTrial) return;
+                  playNote(discTrial.midi, { duration: 1.2, gain: 0.24 });
+                  if (discPlayback) {
+                    setTimeout(
+                      () =>
+                        playNote(discTrial.midi, { duration: 1.2, gain: 0.24 }),
+                      1000,
+                    );
+                  }
+                }}
                 className="py-3 px-8 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]"
               >
                 ▸ Hear note
