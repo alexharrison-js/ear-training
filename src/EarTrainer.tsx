@@ -451,6 +451,7 @@ function useAudioEngine() {
   const ctxRef = useRef(null);
   const bufferCache = useRef({});
   const sustainVoices = useRef([]);
+  const activeVoices = useRef([]);
 
   const [audioSettings, setAudioSettings] = useState(() =>
     lsGet(LS_AUDIO, AUDIO_DEFAULTS),
@@ -620,6 +621,17 @@ function useAudioEngine() {
       );
       master.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
 
+      const voice = {
+        source,
+        gainNode: master,
+        startAt,
+        endAt: startAt + duration,
+      };
+      activeVoices.current.push(voice);
+      source.onended = () => {
+        activeVoices.current = activeVoices.current.filter((v) => v !== voice);
+      };
+
       source.start(startAt);
       source.stop(startAt + duration + 0.1);
     },
@@ -651,6 +663,24 @@ function useAudioEngine() {
         } catch {}
       });
       sustainVoices.current = [];
+    },
+    [getCtx],
+  );
+
+  const stopAll = useCallback(
+    async (fadeSeconds = 0.08) => {
+      if (!ctxRef.current) return;
+      const ctx = await getCtx();
+      const now = ctx.currentTime;
+      activeVoices.current.forEach(({ source, gainNode }) => {
+        try {
+          gainNode.gain.cancelScheduledValues(now);
+          gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+          gainNode.gain.exponentialRampToValueAtTime(0.0001, now + fadeSeconds);
+          source.stop(now + fadeSeconds + 0.05);
+        } catch {}
+      });
+      activeVoices.current = [];
     },
     [getCtx],
   );
@@ -691,6 +721,7 @@ function useAudioEngine() {
     playChord,
     sustainChord,
     stopSustain,
+    stopAll,
     audioSettings,
     updateAudio,
   };
@@ -1739,7 +1770,7 @@ const AP_DEFAULT_PROGRESS = {
 const AP_DISC_DEFAULT = { pitchStats: {}, sessionCorrect: 0, sessionTotal: 0 };
 
 function AbsolutePitchTab({ audio }) {
-  const { playNote, audioSettings, updateAudio } = audio;
+  const { playNote, stopAll, audioSettings, updateAudio } = audio;
 
   // All AP settings in one persisted object
   const [apSettings, setApSettings] = useState(() =>
@@ -2050,6 +2081,9 @@ function AbsolutePitchTab({ audio }) {
   const handleDiscGuess = useCallback(
     (guessValue) => {
       if (discAnswered || !discTrial) return;
+      stopAll();
+      clearTimeout(discTimerRef.current);
+      discTimerRef.current = null;
       const actualName = discTrial.name;
       // Correct if: user picked a specific note and it matches, or user picked "other" and it's not a focus note
       const isFocusNote = discFocusNotes.some(
@@ -2089,7 +2123,14 @@ function AbsolutePitchTab({ audio }) {
       }
       // No re-play of the note in any case
     },
-    [discAnswered, discTrial, discFocusNotes, autoAdvance, generateDiscTrial],
+    [
+      discAnswered,
+      discTrial,
+      discFocusNotes,
+      autoAdvance,
+      generateDiscTrial,
+      stopAll,
+    ],
   );
 
   const discAccuracy =
