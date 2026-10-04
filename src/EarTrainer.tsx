@@ -2057,15 +2057,10 @@ function AbsolutePitchTab({ audio }) {
         setDiscRunning(true);
         discTimerRef.current = setTimeout(() => {
           playNote(midi, { duration: 1.2, gain: 0.24 });
-          if (discPlayback) {
-            discTimerRef.current = setTimeout(() => {
-              playNote(midi, { duration: 1.2, gain: 0.24 });
-            }, 1000);
-          }
         }, 80);
       }
     },
-    [pickOctave, playNote, closeDistractors, discFocusNotes, discPlayback],
+    [pickOctave, playNote, closeDistractors, discFocusNotes],
   );
 
   useEffect(() => {
@@ -2541,13 +2536,6 @@ function AbsolutePitchTab({ audio }) {
                 onClick={() => {
                   if (!discTrial) return;
                   playNote(discTrial.midi, { duration: 1.2, gain: 0.24 });
-                  if (discPlayback) {
-                    setTimeout(
-                      () =>
-                        playNote(discTrial.midi, { duration: 1.2, gain: 0.24 }),
-                      1000,
-                    );
-                  }
                 }}
                 className="py-3 px-8 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]"
               >
