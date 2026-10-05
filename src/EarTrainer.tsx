@@ -523,10 +523,11 @@ function useAudioEngine() {
     const key = `${inst}_${targetMidi}`;
     if (bufferCache.current[key])
       return { buffer: bufferCache.current[key], detune: 0 };
-    const offsets = [
-      0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6, -7, 7, -8, 8, -9, 9, -10, 10,
-      -11, 11, -12, 12,
-    ];
+    // Only search within ±2 semitones. Larger detune values are
+    // unreliable on iOS (Chrome/Safari clamp or silently ignore them),
+    // which caused the played pitch to diverge from the requested MIDI.
+    // Anything farther falls back to the synth, which is pitch-accurate.
+    const offsets = [0, -1, 1, -2, 2];
     for (const off of offsets) {
       const midi = targetMidi + off;
       const ck = `${inst}_${midi}`;
@@ -2005,13 +2006,6 @@ function AbsolutePitchTab({ audio }) {
   const [discLastCorrect, setDiscLastCorrect] = useState(null);
   const [discUserGuess, setDiscUserGuess] = useState(null); // note name or "other"
   const [discRunning, setDiscRunning] = useState(false);
-  const [discPlayback, setDiscPlayback] = useState(() =>
-    lsGet("ear_trainer_ap_disc_playback", false),
-  );
-  useEffect(
-    () => lsSet("ear_trainer_ap_disc_playback", discPlayback),
-    [discPlayback],
-  );
   const discTimerRef = useRef(null);
 
   const stopDiscLoop = useCallback(() => {
@@ -2022,6 +2016,9 @@ function AbsolutePitchTab({ audio }) {
 
   // Generate a trial: pick ANY note from the active octaves.
   // The user then identifies whether it's one of their focus notes or "other".
+  // When playbackRepeat is on (and autoPlay is true), this drives the same
+  // play → 1s → play → 1s → next trial loop as classic mode.
+  const generateDiscTrialRef = useRef(null);
   const generateDiscTrial = useCallback(
     (autoPlay = false) => {
       clearTimeout(discTimerRef.current);
@@ -2030,10 +2027,8 @@ function AbsolutePitchTab({ audio }) {
       const octave = pickOctave();
 
       if (closeDistractors && discFocusNotes.length > 0) {
-        // Pick a random focus note as the anchor
         const anchorName = normalizeNote(randItem(discFocusNotes));
         const anchorMidi = NOTE_NAMES.indexOf(anchorName) + (octave + 1) * 12;
-        // 50% chance: play the focus note itself; 50%: play a ±1 or ±2 semitone neighbour
         const isTarget = Math.random() < 0.5;
         if (isTarget) {
           midi = anchorMidi;
@@ -2044,7 +2039,6 @@ function AbsolutePitchTab({ audio }) {
           noteName = NOTE_NAMES[((midi % 12) + 12) % 12];
         }
       } else {
-        // Broad mode: any of the 12 notes
         noteName = randItem(NOTE_NAMES);
         midi = NOTE_NAMES.indexOf(noteName) + (octave + 1) * 12;
       }
@@ -2053,22 +2047,48 @@ function AbsolutePitchTab({ audio }) {
       setDiscAnswered(false);
       setDiscLastCorrect(null);
       setDiscUserGuess(null);
-      if (autoPlay) {
-        setDiscRunning(true);
+
+      if (!autoPlay) return;
+
+      setDiscRunning(true);
+
+      // Playback-repeat mode: play → 1s → play → 1s → next trial.
+      // Otherwise: play once and wait for the user to answer.
+      if (playbackRepeat) {
+        discTimerRef.current = setTimeout(() => {
+          playNote(midi, { duration: 1.2, gain: 0.24 });
+          discTimerRef.current = setTimeout(() => {
+            playNote(midi, { duration: 1.2, gain: 0.24 });
+            discTimerRef.current = setTimeout(() => {
+              generateDiscTrialRef.current?.(true);
+            }, 1000);
+          }, 1000);
+        }, 80);
+      } else {
         discTimerRef.current = setTimeout(() => {
           playNote(midi, { duration: 1.2, gain: 0.24 });
         }, 80);
       }
     },
-    [pickOctave, playNote, closeDistractors, discFocusNotes],
+    [pickOctave, playNote, closeDistractors, discFocusNotes, playbackRepeat],
   );
+
+  useEffect(() => {
+    generateDiscTrialRef.current = generateDiscTrial;
+  }, [generateDiscTrial]);
 
   useEffect(() => {
     if (apMode === "discrimination") {
       stopDiscLoop();
       generateDiscTrial(false);
     }
-  }, [apMode, discFocusNotes.join(","), enabledOctaves.join(",")]);
+  }, [
+    apMode,
+    discFocusNotes.join(","),
+    enabledOctaves.join(","),
+    closeDistractors,
+    playbackRepeat,
+  ]);
 
   useEffect(() => () => clearTimeout(discTimerRef.current), []);
 
@@ -2243,26 +2263,6 @@ function AbsolutePitchTab({ audio }) {
                     >
                       <span
                         className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#120d0a] transition-transform duration-200 ${closeDistractors ? "translate-x-4" : "translate-x-0"}`}
-                      />
-                    </button>
-                  </div>
-                  <div className="border-t border-amber-900/30 pt-2 flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-xs text-amber-100">Play it back</div>
-                      <div className="text-[10px] text-amber-200/30 leading-snug mt-0.5">
-                        Plays note · 1s · plays again · then you answer. Gives
-                        you a second hearing to lock in the chroma before
-                        committing.
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setDiscPlayback((p) => !p)}
-                      role="switch"
-                      aria-checked={discPlayback}
-                      className={`relative flex-shrink-0 w-9 h-5 rounded-full transition-colors duration-200 ${discPlayback ? "bg-amber-500" : "bg-amber-900/50"}`}
-                    >
-                      <span
-                        className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#120d0a] transition-transform duration-200 ${discPlayback ? "translate-x-4" : "translate-x-0"}`}
                       />
                     </button>
                   </div>
