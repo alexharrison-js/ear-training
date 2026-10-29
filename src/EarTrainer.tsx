@@ -1,3 +1,4 @@
+```jsx
 // @ts-nocheck
 import React, {
   useState,
@@ -141,7 +142,7 @@ const AP_STAGES = [
     id: 1,
     label: "Stage 1",
     notes: ["F", "B"],
-    desc: "F & B — tritone, maximum contrast. F is the Wong anchor.",
+    desc: "F & B — tritone, maximum contrast. F is the Wong 2025 anchor.",
   },
   {
     id: 2,
@@ -315,23 +316,30 @@ const ALL_OCTAVES = [2, 3, 4, 5, 6];
 const AUDIO_DEFAULTS = {
   enabledInstruments: ["acoustic_grand_piano"],
   randomizeInstruments: false,
-  masterVolume: 1.0,
+  masterVolume: 1.0, // multiplier: 1.0 = normal, up to 3.0 for quiet samples
 };
 
 const AP_SETTINGS_DEFAULTS = {
   apMode: "classic",
   discFocusNotes: ["F", "B"],
-  closeDistractors: false,
+  closeDistractors: false, // when on: plays focus note or ±1-2 semitone neighbour
   enabledOctaves: [4],
   customNotesEnabled: false,
   customNotes: ["F", "B"],
   autoAdvance: false,
   playbackRepeat: false,
   transposition: "C",
+  // Interference settings
   interferenceEnabled: false,
-  interferenceType: "whitenoise", // "whitenoise" | "shepard"
+  interferenceType: "wn", // "wn" white noise | "st" shepherd tone
+  interferenceVolume: 0.5, // 0..1
+  interferenceDuration: 1.2, // seconds played before each note
 };
 
+// How many semitones to shift a concert-pitch label upward for display.
+// Audio always plays concert pitch — only displayed note names change.
+// Bb instruments (tenor sax): concert Bb sounds like written C, so +2.
+// Eb instruments (alto sax):  concert Eb sounds like written C, so +9.
 const TRANSPOSITION_OFFSETS = { C: 0, Bb: 2, Eb: 9 };
 const TRANSPOSITION_LABELS = {
   C: "Concert (C)",
@@ -339,6 +347,7 @@ const TRANSPOSITION_LABELS = {
   Eb: "Eb instrument (alto/bari sax)",
 };
 
+// Normalize any enharmonic flat name to the sharp name used in NOTE_NAMES.
 const FLAT_TO_SHARP = {
   Bb: "A#",
   Eb: "D#",
@@ -352,6 +361,7 @@ function normalizeNote(n) {
   return FLAT_TO_SHARP[n] || n;
 }
 
+// Convert a concert-pitch note name to the displayed written name.
 function transposeLabel(concertName, offset) {
   if (offset === 0) return normalizeNote(concertName);
   const sharp = normalizeNote(concertName);
@@ -440,14 +450,16 @@ function buildVoicedChord(degrees, rootMidi, style, rng) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   AUDIO ENGINE
+   AUDIO ENGINE  — sample-based, multi-instrument, async wake-up
    ═══════════════════════════════════════════════════════════════ */
 
 function useAudioEngine() {
   const ctxRef = useRef(null);
   const bufferCache = useRef({});
+  const noiseBufferCache = useRef(null);
   const sustainVoices = useRef([]);
   const activeVoices = useRef([]);
+  const interferenceVoices = useRef([]);
 
   const [audioSettings, setAudioSettings] = useState(() =>
     lsGet(LS_AUDIO, AUDIO_DEFAULTS),
@@ -471,6 +483,7 @@ function useAudioEngine() {
     return randItem(enabledInstruments);
   }, [randomizeInstruments, enabledInstruments]);
 
+  /* --- AudioContext management --- */
   const getCtx = useCallback(async () => {
     if (ctxRef.current?.state === "closed") ctxRef.current = null;
     if (!ctxRef.current)
@@ -492,6 +505,7 @@ function useAudioEngine() {
     return ctxRef.current;
   }, []);
 
+  // Eager resume on any user gesture / tab visibility change (iOS wake-up fix)
   useEffect(() => {
     const resume = async () => {
       if (ctxRef.current && ctxRef.current.state !== "running")
@@ -512,10 +526,15 @@ function useAudioEngine() {
     };
   }, []);
 
+  /* --- Sample fetching with nearest-neighbour pitch-shift fallback --- */
   const getBuffer = useCallback(async (ctx, inst, targetMidi) => {
     const key = `${inst}_${targetMidi}`;
     if (bufferCache.current[key])
       return { buffer: bufferCache.current[key], detune: 0 };
+    // Only search within ±2 semitones. Larger detune values are
+    // unreliable on iOS (Chrome/Safari clamp or silently ignore them),
+    // which caused the played pitch to diverge from the requested MIDI.
+    // Anything farther falls back to the synth, which is pitch-accurate.
     const offsets = [0, -1, 1, -2, 2];
     for (const off of offsets) {
       const midi = targetMidi + off;
@@ -538,6 +557,7 @@ function useAudioEngine() {
     return null;
   }, []);
 
+  /* --- Synth fallback --- */
   const playSynth = useCallback(
     (ctx, midi, { duration = 1.4, delay = 0, gain = 0.22 } = {}) => {
       const startAt = ctx.currentTime + delay;
@@ -574,6 +594,7 @@ function useAudioEngine() {
     [],
   );
 
+  /* --- playNote: awaits context, picks instrument, falls back to synth --- */
   const playNote = useCallback(
     async (
       midi,
@@ -582,7 +603,7 @@ function useAudioEngine() {
       const ctx = await getCtx();
       const instId = inst || pickInstrument();
       const result = await getBuffer(ctx, instId, midi);
-      const amplifiedGain = Math.min(gain * masterVolume, 2.0);
+      const amplifiedGain = Math.min(gain * masterVolume, 2.0); // cap at 2.0 to prevent clipping
 
       const startAt = ctx.currentTime + delay;
 
@@ -624,80 +645,6 @@ function useAudioEngine() {
       source.stop(startAt + duration + 0.1);
     },
     [getCtx, getBuffer, pickInstrument, playSynth, masterVolume],
-  );
-
-  /* --- Interference Generators (White Noise Burst & Shepard Tone) --- */
-  const playWhiteNoiseBurst = useCallback(
-    async ({ duration = 0.4, gain = 0.06 } = {}) => {
-      const ctx = await getCtx();
-      const bufferSize = ctx.sampleRate * duration;
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-      }
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      const filter = ctx.createBiquadFilter();
-      filter.type = "bandpass";
-      filter.frequency.value = 1200;
-      filter.Q.value = 0.8;
-      const master = ctx.createGain();
-      const startAt = ctx.currentTime;
-      const amplifiedGain = Math.min(gain * masterVolume, 1.0);
-      master.gain.setValueAtTime(0, startAt);
-      master.gain.linearRampToValueAtTime(amplifiedGain, startAt + 0.04);
-      master.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
-
-      source.connect(filter);
-      filter.connect(master);
-      master.connect(ctx.destination);
-      source.start(startAt);
-      source.stop(startAt + duration + 0.1);
-    },
-    [getCtx, masterVolume],
-  );
-
-  const playShepardTone = useCallback(
-    async ({ duration = 0.7, direction = "descending", gain = 0.1 } = {}) => {
-      const ctx = await getCtx();
-      const startAt = ctx.currentTime;
-      const baseFreqs = [65.41, 130.81, 261.63, 523.25, 1046.5, 2093.0, 4186.0];
-      const master = ctx.createGain();
-      const amplifiedGain = Math.min(gain * masterVolume, 1.0);
-      master.gain.setValueAtTime(0, startAt);
-      master.gain.linearRampToValueAtTime(amplifiedGain, startAt + 0.04);
-      master.gain.setValueAtTime(amplifiedGain, startAt + duration - 0.15);
-      master.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
-      master.connect(ctx.destination);
-
-      baseFreqs.forEach((f) => {
-        const osc = ctx.createOscillator();
-        const g = ctx.createGain();
-        osc.type = "sine";
-
-        const freqAtStart = direction === "descending" ? f * 2 : f;
-        const freqAtEnd = direction === "descending" ? f : f * 2;
-
-        osc.frequency.setValueAtTime(freqAtStart, startAt);
-        osc.frequency.exponentialRampToValueAtTime(
-          freqAtEnd,
-          startAt + duration,
-        );
-
-        const centerLog = Math.log(440);
-        const currLog = Math.log(f);
-        const dist = Math.abs(currLog - centerLog);
-        const amp = Math.max(0, 1 - dist / 2.5);
-
-        g.gain.value = amp * 0.25;
-        osc.connect(g);
-        g.connect(master);
-        osc.start(startAt);
-        osc.stop(startAt + duration + 0.1);
-      });
-    },
-    [getCtx, masterVolume],
   );
 
   const playChord = useCallback(
@@ -778,22 +725,223 @@ function useAudioEngine() {
     [getCtx, getBuffer, pickInstrument, stopSustain, playSynth],
   );
 
+  /* ═══════════════════════════════════════════════════════════════
+     INTERFERENCE SOUNDS  (white noise, shepherd tone)
+     ═══════════════════════════════════════════════════════════════ */
+
+  // Build / reuse a looping white-noise buffer (2s).
+  const getNoiseBuffer = useCallback(async (ctx) => {
+    if (noiseBufferCache.current) return noiseBufferCache.current;
+    const len = Math.floor(ctx.sampleRate * 2);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    noiseBufferCache.current = buf;
+    return buf;
+  }, []);
+
+  // Play white noise for `duration` seconds at `volume` (0..1).
+  const playWhiteNoise = useCallback(
+    async ({ duration = 1.2, volume = 0.5 } = {}) => {
+      const ctx = await getCtx();
+      const buf = await getNoiseBuffer(ctx);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+
+      // gentle lowpass to tame harshness
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = 6000;
+
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      src.connect(lp);
+      lp.connect(g);
+      g.connect(ctx.destination);
+
+      const now = ctx.currentTime;
+      const fadeIn = 0.08;
+      const fadeOut = 0.15;
+      const clampedVol = Math.max(0, Math.min(1, volume)) * 0.6; // headroom
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(clampedVol, now + fadeIn);
+      g.gain.setValueAtTime(clampedVol, now + Math.max(fadeIn, duration - fadeOut));
+      g.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+      const voice = { source: src, gainNode: g };
+      interferenceVoices.current.push(voice);
+      src.onended = () => {
+        interferenceVoices.current = interferenceVoices.current.filter(
+          (v) => v !== voice,
+        );
+      };
+
+      src.start(now);
+      src.stop(now + duration + 0.05);
+    },
+    [getCtx, getNoiseBuffer],
+  );
+
+  // Play a shepherd tone (ever-ascending illusion) for `duration` seconds.
+  // Each "layer" is an octave apart; every layer ramps its gain in a cycle
+  // so the ear hears a continuous rise while the actual frequencies reset.
+  const playShepherdTone = useCallback(
+    async ({ duration = 1.2, volume = 0.5 } = {}) => {
+      const ctx = await getCtx();
+      const master = ctx.createGain();
+      master.gain.value = 0;
+      master.connect(ctx.destination);
+
+      const now = ctx.currentTime;
+      const fadeIn = 0.08;
+      const fadeOut = 0.15;
+      const clampedVol = Math.max(0, Math.min(1, volume)) * 0.35;
+      master.gain.setValueAtTime(0, now);
+      master.gain.linearRampToValueAtTime(clampedVol, now + fadeIn);
+      master.gain.setValueAtTime(
+        clampedVol,
+        now + Math.max(fadeIn, duration - fadeOut),
+      );
+      master.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+      // Base band: C3-ish up an octave each
+      const baseFreq = 130.81;
+      const numLayers = 6;
+      const startFreq = baseFreq;
+      const endFreq = baseFreq * 2; // one octave rise over the window
+      const oscillators = [];
+
+      for (let i = 0; i < numLayers; i++) {
+        const oct = Math.pow(2, i);
+        const osc = ctx.createOscillator();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(startFreq * oct, now);
+        osc.frequency.exponentialRampToValueAtTime(
+          endFreq * oct,
+          now + duration,
+        );
+
+        const g = ctx.createGain();
+        g.gain.value = 0;
+
+        // Each layer cycles its gain with offset so one is always audible,
+        // and each peaks when its frequency is near the "reset" boundary
+        const phase = i / numLayers;
+        const cycleLen = duration / numLayers;
+        // Build a triangle-ish envelope over the window
+        const steps = 24;
+        for (let s = 0; s <= steps; s++) {
+          const t = (s / steps) * duration;
+          const local = (t / duration + phase) % 1;
+          // smooth bump 0..1..0 across local cycle
+          const env = Math.sin(local * Math.PI);
+          g.gain.setValueAtTime(Math.max(0.0001, env * 0.6), now + t);
+        }
+
+        osc.connect(g);
+        g.connect(master);
+        osc.start(now);
+        osc.stop(now + duration + 0.05);
+        oscillators.push({ osc, g });
+      }
+
+      const voice = { oscillators, gainNode: master };
+      interferenceVoices.current.push(voice);
+      // Cleanup after duration
+      const cleanupId = setTimeout(() => {
+        interferenceVoices.current = interferenceVoices.current.filter(
+          (v) => v !== voice,
+        );
+      }, (duration + 0.2) * 1000);
+      voice.cleanupId = cleanupId;
+    },
+    [getCtx],
+  );
+
+  const stopInterference = useCallback(async () => {
+    if (!ctxRef.current) return;
+    const ctx = await getCtx();
+    const now = ctx.currentTime;
+    interferenceVoices.current.forEach((v) => {
+      try {
+        if (v.gainNode) {
+          v.gainNode.gain.cancelScheduledValues(now);
+          v.gainNode.gain.setValueAtTime(v.gainNode.gain.value, now);
+          v.gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+        }
+        if (v.source) {
+          v.source.stop(now + 0.1);
+        }
+        if (v.oscillators) {
+          v.oscillators.forEach(({ osc }) => {
+            try {
+              osc.stop(now + 0.1);
+            } catch {}
+          });
+        }
+        if (v.cleanupId) clearTimeout(v.cleanupId);
+      } catch {}
+    });
+    interferenceVoices.current = [];
+  }, [getCtx]);
+
+  // Unified interference player
+  const playInterference = useCallback(
+    async ({
+      type = "wn",
+      duration = 1.2,
+      volume = 0.5,
+    } = {}) => {
+      if (type === "st") {
+        return playShepherdTone({ duration, volume });
+      }
+      return playWhiteNoise({ duration, volume });
+    },
+    [playWhiteNoise, playShepherdTone],
+  );
+
   return {
     playNote,
     playChord,
     sustainChord,
     stopSustain,
     stopAll,
-    playWhiteNoiseBurst,
-    playShepardTone,
     audioSettings,
     updateAudio,
+    playInterference,
+    stopInterference,
   };
 }
 
 /* ═══════════════════════════════════════════════════════════════
    UI PRIMITIVES
    ═══════════════════════════════════════════════════════════════ */
+
+/* ── UI PRIMITIVES — Y2K illustrated style ──────────────────────
+   Heavy ink outlines, pastel fills, offset drop-shadows.
+   Every interactive element looks like a sticker or stamp.
+   ──────────────────────────────────────────────────────────────── */
+
+// Shared outline-card style
+const card = (extra = {}) => ({
+  background: "var(--card-bg)",
+  border: "var(--border-width) solid var(--border)",
+  borderRadius: "var(--border-radius)",
+  boxShadow: "var(--shadow-card)",
+  ...extra,
+});
+
+const pill = (bg = "var(--btn-default)", extra = {}) => ({
+  background: bg,
+  border: "var(--border-width) solid var(--border)",
+  borderRadius: 999,
+  boxShadow: "var(--shadow-btn)",
+  cursor: "pointer",
+  ...extra,
+});
 
 function Select({ label, value, onChange, options }) {
   return (
@@ -1035,6 +1183,7 @@ function ConfirmButton({
   );
 }
 
+/* ─── Shared audio settings panel ──────────────────────────────── */
 function AudioSettingsPanel({ audioSettings, updateAudio }) {
   const {
     enabledInstruments,
@@ -1052,6 +1201,7 @@ function AudioSettingsPanel({ audioSettings, updateAudio }) {
   const pct = ((masterVolume - 0.5) / 2.5) * 100;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Volume */}
       <div>
         <div
           style={{
@@ -1113,6 +1263,7 @@ function AudioSettingsPanel({ audioSettings, updateAudio }) {
           <span>300%</span>
         </div>
       </div>
+      {/* Instruments */}
       <Checkbox
         label="Randomize from all instruments"
         sub="Each note picks a random instrument"
@@ -1808,8 +1959,16 @@ const AP_DEFAULT_PROGRESS = {
 const AP_DISC_DEFAULT = { pitchStats: {}, sessionCorrect: 0, sessionTotal: 0 };
 
 function AbsolutePitchTab({ audio }) {
-  const { playNote, playWhiteNoiseBurst, playShepardTone, stopAll, audioSettings, updateAudio } = audio;
+  const {
+    playNote,
+    stopAll,
+    audioSettings,
+    updateAudio,
+    playInterference,
+    stopInterference,
+  } = audio;
 
+  // All AP settings in one persisted object
   const [apSettings, setApSettings] = useState(() =>
     lsGet(LS_AP_SETS, AP_SETTINGS_DEFAULTS),
   );
@@ -1832,13 +1991,19 @@ function AbsolutePitchTab({ audio }) {
   const playbackRepeat = apSettings.playbackRepeat;
   const transposition = apSettings.transposition || "C";
   const txOffset = TRANSPOSITION_OFFSETS[transposition] || 0;
-  const interferenceEnabled = apSettings.interferenceEnabled || false;
-  const interferenceType = apSettings.interferenceType || "whitenoise";
 
+  // Interference settings
+  const interferenceEnabled = apSettings.interferenceEnabled || false;
+  const interferenceType = apSettings.interferenceType || "wn";
+  const interferenceVolume = apSettings.interferenceVolume ?? 0.5;
+  const interferenceDuration = apSettings.interferenceDuration ?? 1.2;
+
+  // Display a concert-pitch note name in the user's chosen transposition
   const tx = useCallback((n) => transposeLabel(n, txOffset), [txOffset]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // --- Classic mode ---
   const [progress, setProgress] = useState(() =>
     lsGet(LS_AP, AP_DEFAULT_PROGRESS),
   );
@@ -1850,7 +2015,7 @@ function AbsolutePitchTab({ audio }) {
   const [userGuess, setUserGuess] = useState(null);
   const [showNoteStats, setShowNoteStats] = useState(false);
   const [jumpStage, setJumpStage] = useState(false);
-  const [autoRunning, setAutoRunning] = useState(false);
+  const [autoRunning, setAutoRunning] = useState(false); // true when auto/playback loop is active
 
   const autoAdvanceTimer = useRef(null);
 
@@ -1858,11 +2023,16 @@ function AbsolutePitchTab({ audio }) {
     clearTimeout(autoAdvanceTimer.current);
     autoAdvanceTimer.current = null;
     setAutoRunning(false);
-  }, []);
+    stopInterference();
+  }, [stopInterference]);
 
   const stage =
     AP_STAGES.find((s) => s.id === progress.stageId) || AP_STAGES[0];
+
+  // The pool of notes to draw from: custom if enabled, else stage notes
   const activeNotes = customNotesEnabled ? customNotes : stage.notes;
+
+  // The buttons shown in the answer grid — custom if enabled, else stage notes
   const answerNotes = customNotesEnabled ? customNotes : stage.notes;
 
   const pickOctave = useCallback(
@@ -1870,18 +2040,10 @@ function AbsolutePitchTab({ audio }) {
     [enabledOctaves],
   );
 
-  const triggerInterference = useCallback(() => {
-    if (!interferenceEnabled) return;
-    if (interferenceType === "shepard") {
-      playShepardTone({ duration: 0.7, direction: "descending", gain: 0.1 });
-    } else {
-      playWhiteNoiseBurst({ duration: 0.35, gain: 0.06 });
-    }
-  }, [interferenceEnabled, interferenceType, playShepardTone, playWhiteNoiseBurst]);
-
   const generateNote = useCallback(() => {
     if (activeNotes.length === 0) return;
     clearTimeout(autoAdvanceTimer.current);
+    stopInterference();
     const noteName = randItem(activeNotes);
     const octave = pickOctave();
     const midi = NOTE_NAMES.indexOf(noteName) + (octave + 1) * 12;
@@ -1889,11 +2051,13 @@ function AbsolutePitchTab({ audio }) {
     setAnswered(false);
     setLastCorrect(null);
     setUserGuess(null);
-  }, [activeNotes, pickOctave]);
+  }, [activeNotes, pickOctave, stopInterference]);
 
+  // Normal auto-advance: play note once, show buttons, wait for user tap.
   const generateAndPlay = useCallback(() => {
     if (activeNotes.length === 0) return;
     clearTimeout(autoAdvanceTimer.current);
+    stopInterference();
     const noteName = randItem(activeNotes);
     const octave = pickOctave();
     const midi = NOTE_NAMES.indexOf(noteName) + (octave + 1) * 12;
@@ -1902,12 +2066,37 @@ function AbsolutePitchTab({ audio }) {
     setLastCorrect(null);
     setUserGuess(null);
     setAutoRunning(true);
-    autoAdvanceTimer.current = setTimeout(
-      () => playNote(midi, { duration: 1.8, gain: 0.24 }),
-      80,
-    );
-  }, [activeNotes, pickOctave, playNote]);
 
+    if (interferenceEnabled) {
+      // Play interference, then the note after it finishes
+      playInterference({
+        type: interferenceType,
+        duration: interferenceDuration,
+        volume: interferenceVolume,
+      });
+      autoAdvanceTimer.current = setTimeout(
+        () => playNote(midi, { duration: 1.8, gain: 0.24 }),
+        interferenceDuration * 1000 + 120,
+      );
+    } else {
+      autoAdvanceTimer.current = setTimeout(
+        () => playNote(midi, { duration: 1.8, gain: 0.24 }),
+        80,
+      );
+    }
+  }, [
+    activeNotes,
+    pickOctave,
+    playNote,
+    interferenceEnabled,
+    interferenceType,
+    interferenceDuration,
+    interferenceVolume,
+    playInterference,
+    stopInterference,
+  ]);
+
+  // Play-it-back: fully automatic loop — play → 1s → play again → 1s → next note.
   const runPlaybackRepeat = useCallback(() => {
     if (activeNotes.length === 0) return;
     const noteName = randItem(activeNotes);
@@ -1918,13 +2107,63 @@ function AbsolutePitchTab({ audio }) {
     setLastCorrect(null);
     setUserGuess(null);
     setAutoRunning(true);
-    autoAdvanceTimer.current = setTimeout(() => {
-      playNote(midi, { duration: 1.2, gain: 0.24 });
-      autoAdvanceTimer.current = setTimeout(() => {
-        runPlaybackRepeat();
-      }, 1000);
-    }, 80);
-  }, [activeNotes, pickOctave, playNote]);
+
+    const playNoteWithInterferenceThenNext = (n) => {
+      if (interferenceEnabled) {
+        playInterference({
+          type: interferenceType,
+          duration: interferenceDuration,
+          volume: interferenceVolume,
+        });
+        autoAdvanceTimer.current = setTimeout(() => {
+          playNote(midi, { duration: 1.2, gain: 0.24 });
+          autoAdvanceTimer.current = setTimeout(() => {
+            if (n === 0) {
+              // second time – play again after interference
+              playInterference({
+                type: interferenceType,
+                duration: interferenceDuration,
+                volume: interferenceVolume,
+              });
+              autoAdvanceTimer.current = setTimeout(() => {
+                playNote(midi, { duration: 1.2, gain: 0.24 });
+                autoAdvanceTimer.current = setTimeout(() => {
+                  runPlaybackRepeatRef.current?.();
+                }, 1000);
+              }, interferenceDuration * 1000 + 120);
+            } else {
+              // first time only – go to second cycle directly
+              runPlaybackRepeatRef.current?.();
+            }
+          }, 1000);
+        }, interferenceDuration * 1000 + 120);
+      } else {
+        playNote(midi, { duration: 1.2, gain: 0.24 });
+        autoAdvanceTimer.current = setTimeout(() => {
+          playNote(midi, { duration: 1.2, gain: 0.24 });
+          autoAdvanceTimer.current = setTimeout(() => {
+            runPlaybackRepeatRef.current?.();
+          }, 1000);
+        }, 1000);
+      }
+    };
+
+    playNoteWithInterferenceThenNext(0);
+  }, [
+    activeNotes,
+    pickOctave,
+    playNote,
+    interferenceEnabled,
+    interferenceType,
+    interferenceDuration,
+    interferenceVolume,
+    playInterference,
+  ]);
+
+  const runPlaybackRepeatRef = useRef(runPlaybackRepeat);
+  useEffect(() => {
+    runPlaybackRepeatRef.current = runPlaybackRepeat;
+  }, [runPlaybackRepeat]);
 
   const startAutoMode = useCallback(() => {
     if (playbackRepeat) runPlaybackRepeat();
@@ -1939,7 +2178,13 @@ function AbsolutePitchTab({ audio }) {
     customNotesEnabled,
     customNotes.join(","),
   ]);
-  useEffect(() => () => clearTimeout(autoAdvanceTimer.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(autoAdvanceTimer.current);
+      stopInterference();
+    },
+    [stopInterference],
+  );
 
   const handleGuess = (guessName) => {
     if (answered || !currentNote) return;
@@ -1948,8 +2193,7 @@ function AbsolutePitchTab({ audio }) {
     setLastCorrect(correct);
     setUserGuess(guessName);
 
-    triggerInterference();
-
+    // Update progress stats (only in stage mode)
     if (!customNotesEnabled) {
       setProgress((prev) => {
         const noteStats = { ...prev.noteStats };
@@ -1987,7 +2231,9 @@ function AbsolutePitchTab({ audio }) {
       if (correct) {
         generateAndPlay();
       }
+      // Wrong: stay, show error, user taps Continue
     } else if (!autoAdvance) {
+      // Manual mode: re-play the note for reinforcement
       setTimeout(
         () => playNote(currentNote.midi, { duration: 1.5, gain: 0.22 }),
         300,
@@ -2030,6 +2276,7 @@ function AbsolutePitchTab({ audio }) {
     patchAP({ enabledOctaves: next });
   };
 
+  // --- Discrimination mode ---
   const [discProgress, setDiscProgress] = useState(() =>
     lsGet("ear_trainer_ap_disc_v1", AP_DISC_DEFAULT),
   );
@@ -2038,10 +2285,10 @@ function AbsolutePitchTab({ audio }) {
     [discProgress],
   );
 
-  const [discTrial, setDiscTrial] = useState(null);
+  const [discTrial, setDiscTrial] = useState(null); // {midi, name, octave}
   const [discAnswered, setDiscAnswered] = useState(false);
   const [discLastCorrect, setDiscLastCorrect] = useState(null);
-  const [discUserGuess, setDiscUserGuess] = useState(null);
+  const [discUserGuess, setDiscUserGuess] = useState(null); // note name or "other"
   const [discRunning, setDiscRunning] = useState(false);
   const discTimerRef = useRef(null);
 
@@ -2049,8 +2296,13 @@ function AbsolutePitchTab({ audio }) {
     clearTimeout(discTimerRef.current);
     discTimerRef.current = null;
     setDiscRunning(false);
-  }, []);
+    stopInterference();
+  }, [stopInterference]);
 
+  // Generate a trial: pick ANY note from the active octaves.
+  // The user then identifies whether it's one of their focus notes or "other".
+  // When playbackRepeat is on (and autoPlay is true), this drives the same
+  // play → 1s → play → 1s → next trial loop as classic mode.
   const generateDiscTrialRef = useRef(null);
   const generateDiscTrial = useCallback(
     (autoPlay = false) => {
@@ -2085,23 +2337,78 @@ function AbsolutePitchTab({ audio }) {
 
       setDiscRunning(true);
 
+      // Playback-repeat mode: interference, note, 1s, interference, note, 1s, next.
+      // Otherwise: interference then note, wait for answer.
       if (playbackRepeat) {
-        discTimerRef.current = setTimeout(() => {
-          playNote(midi, { duration: 1.2, gain: 0.24 });
+        // first cycle
+        const playFirst = () => {
+          playInterference({
+            type: interferenceType,
+            duration: interferenceDuration,
+            volume: interferenceVolume,
+          });
           discTimerRef.current = setTimeout(() => {
             playNote(midi, { duration: 1.2, gain: 0.24 });
             discTimerRef.current = setTimeout(() => {
-              generateDiscTrialRef.current?.(true);
+              // second cycle
+              playInterference({
+                type: interferenceType,
+                duration: interferenceDuration,
+                volume: interferenceVolume,
+              });
+              discTimerRef.current = setTimeout(() => {
+                playNote(midi, { duration: 1.2, gain: 0.24 });
+                discTimerRef.current = setTimeout(() => {
+                  generateDiscTrialRef.current?.(true);
+                }, 1000);
+              }, interferenceDuration * 1000 + 120);
             }, 1000);
-          }, 1000);
-        }, 80);
+          }, interferenceDuration * 1000 + 120);
+        };
+        if (interferenceEnabled) {
+          playFirst();
+        } else {
+          // No interference: just play twice
+          discTimerRef.current = setTimeout(() => {
+            playNote(midi, { duration: 1.2, gain: 0.24 });
+            discTimerRef.current = setTimeout(() => {
+              playNote(midi, { duration: 1.2, gain: 0.24 });
+              discTimerRef.current = setTimeout(() => {
+                generateDiscTrialRef.current?.(true);
+              }, 1000);
+            }, 1000);
+          }, 80);
+        }
       } else {
-        discTimerRef.current = setTimeout(() => {
-          playNote(midi, { duration: 1.2, gain: 0.24 });
-        }, 80);
+        // single play
+        if (interferenceEnabled) {
+          playInterference({
+            type: interferenceType,
+            duration: interferenceDuration,
+            volume: interferenceVolume,
+          });
+          discTimerRef.current = setTimeout(() => {
+            playNote(midi, { duration: 1.2, gain: 0.24 });
+          }, interferenceDuration * 1000 + 120);
+        } else {
+          discTimerRef.current = setTimeout(() => {
+            playNote(midi, { duration: 1.2, gain: 0.24 });
+          }, 80);
+        }
       }
     },
-    [pickOctave, playNote, closeDistractors, discFocusNotes, playbackRepeat],
+    [
+      pickOctave,
+      playNote,
+      closeDistractors,
+      discFocusNotes,
+      playbackRepeat,
+      interferenceEnabled,
+      interferenceType,
+      interferenceDuration,
+      interferenceVolume,
+      playInterference,
+    ],
   );
 
   useEffect(() => {
@@ -2121,8 +2428,15 @@ function AbsolutePitchTab({ audio }) {
     playbackRepeat,
   ]);
 
-  useEffect(() => () => clearTimeout(discTimerRef.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(discTimerRef.current);
+      stopInterference();
+    },
+    [stopInterference],
+  );
 
+  // guessValue: a note name (one of discFocusNotes) or "other"
   const handleDiscGuess = useCallback(
     (guessValue) => {
       if (discAnswered || !discTrial) return;
@@ -2130,6 +2444,7 @@ function AbsolutePitchTab({ audio }) {
       clearTimeout(discTimerRef.current);
       discTimerRef.current = null;
       const actualName = discTrial.name;
+      // Correct if: user picked a specific note and it matches, or user picked "other" and it's not a focus note
       const isFocusNote = discFocusNotes.some(
         (n) => normalizeNote(n) === normalizeNote(actualName),
       );
@@ -2142,8 +2457,7 @@ function AbsolutePitchTab({ audio }) {
       setDiscLastCorrect(correct);
       setDiscUserGuess(guessValue);
 
-      triggerInterference();
-
+      // Update stats per note
       setDiscProgress((prev) => {
         const ps = { ...prev.pitchStats };
         const p = ps[actualName] || { correct: 0, total: 0 };
@@ -2159,9 +2473,14 @@ function AbsolutePitchTab({ audio }) {
         };
       });
 
-      if (autoAdvance && correct) {
-        generateDiscTrial(true);
+      if (autoAdvance) {
+        if (correct) {
+          // Correct: instant next trial
+          generateDiscTrial(true);
+        }
+        // Wrong: stay, show error, user taps Continue
       }
+      // No re-play of the note in any case
     },
     [
       discAnswered,
@@ -2170,7 +2489,6 @@ function AbsolutePitchTab({ audio }) {
       autoAdvance,
       generateDiscTrial,
       stopAll,
-      triggerInterference,
     ],
   );
 
@@ -2193,6 +2511,7 @@ function AbsolutePitchTab({ audio }) {
 
   return (
     <div className="space-y-3">
+      {/* ── SETTINGS PANEL ── */}
       <div className="rounded-xl border border-amber-900/30 bg-[#1a1410] overflow-hidden">
         <button
           onClick={() => setSettingsOpen((o) => !o)}
@@ -2206,6 +2525,7 @@ function AbsolutePitchTab({ audio }) {
 
         {settingsOpen && (
           <div className="px-3 pb-3 border-t border-amber-900/30 pt-3 space-y-4">
+            {/* Training mode */}
             <div className="space-y-2">
               <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35">
                 Training mode
@@ -2255,16 +2575,26 @@ function AbsolutePitchTab({ audio }) {
                   </div>
                   <div className="text-[10px] text-amber-200/30">
                     {discFocusNotes.length} selected:{" "}
-                    {discFocusNotes.map((n) => tx(n)).join(" · ")}
+                    {discFocusNotes.map((n) => tx(n)).join(" · ")} · app plays a
+                    note, you identify it or tap "Other"
                   </div>
 
+                  {/* Close distractors toggle */}
                   <div className="border-t border-amber-900/30 pt-2 flex items-start justify-between gap-3">
                     <div>
                       <div className="text-xs text-amber-100">
                         Close distractors
                       </div>
                       <div className="text-[10px] text-amber-200/30 leading-snug mt-0.5">
-                        Plays focus notes or ±1–2 semitone neighbours only. Wong protocol.
+                        When on: plays your focus notes or ±1–2 semitone
+                        neighbours only. Harder — forces fine chroma
+                        discrimination. Wong 2025 protocol.
+                        {closeDistractors && discFocusNotes.length > 1 && (
+                          <span className="block mt-0.5 text-amber-400/50">
+                            Anchor rotates through your {discFocusNotes.length}{" "}
+                            focus notes.
+                          </span>
+                        )}
                       </div>
                     </div>
                     <button
@@ -2284,44 +2614,15 @@ function AbsolutePitchTab({ audio }) {
               )}
             </div>
 
-            {/* Interference distractor toggle & dropdown */}
-            <div className="border-t border-amber-900/30 pt-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-xs text-amber-100">Interference distractor</div>
-                  <div className="text-[10px] text-amber-200/35">
-                    Plays white noise or Shepard tone after user selection to wipe working memory (Wong protocol)
-                  </div>
-                </div>
-                <button
-                  onClick={() => patchAP({ interferenceEnabled: !interferenceEnabled })}
-                  role="switch"
-                  aria-checked={interferenceEnabled}
-                  className={`relative flex-shrink-0 ml-3 w-9 h-5 rounded-full transition-colors duration-200 ${interferenceEnabled ? "bg-amber-500" : "bg-amber-900/50"}`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#120d0a] transition-transform duration-200 ${interferenceEnabled ? "translate-x-4" : "translate-x-0"}`}
-                  />
-                </button>
-              </div>
-              {interferenceEnabled && (
-                <div className="pt-1">
-                  <Select
-                    label="Interference type"
-                    value={interferenceType}
-                    onChange={(v) => patchAP({ interferenceType: v })}
-                    options={[
-                      { value: "whitenoise", label: "White noise burst (quiet)" },
-                      { value: "shepard", label: "Shepard tone (descending)" },
-                    ]}
-                  />
-                </div>
-              )}
-            </div>
-
+            {/* Instrument transposition */}
             <div className="border-t border-amber-900/30 pt-3 space-y-2">
               <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35">
                 Instrument transposition
+              </div>
+              <div className="text-[10px] text-amber-200/30 leading-snug">
+                Audio always plays concert pitch. This shifts the note{" "}
+                <em>labels</em> so you identify pitches by their written name on
+                your instrument — e.g. on tenor sax, concert Bb displays as C.
               </div>
               <div className="space-y-1">
                 {Object.entries(TRANSPOSITION_LABELS).map(([key, label]) => (
@@ -2338,14 +2639,117 @@ function AbsolutePitchTab({ audio }) {
                   </button>
                 ))}
               </div>
+              {transposition !== "C" && (
+                <div className="text-[10px] text-amber-400/60 bg-amber-950/40 rounded-lg px-2.5 py-2 leading-snug">
+                  Active: concert pitch labels shifted +{txOffset} semitone
+                  {txOffset !== 1 ? "s" : ""}. Concert F shows as{" "}
+                  <strong>{tx("F")}</strong> · Concert Bb shows as{" "}
+                  <strong>{tx("A#")}</strong>.
+                </div>
+              )}
             </div>
 
+            {/* Interference */}
+            <div className="border-t border-amber-900/30 pt-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-amber-100">
+                    Interference before note
+                  </div>
+                  <div className="text-[10px] text-amber-200/35">
+                    Plays selected interference sound before each note
+                  </div>
+                </div>
+                <button
+                  onClick={() =>
+                    patchAP({ interferenceEnabled: !interferenceEnabled })
+                  }
+                  role="switch"
+                  aria-checked={interferenceEnabled}
+                  className={`relative flex-shrink-0 ml-3 w-9 h-5 rounded-full transition-colors duration-200 ${interferenceEnabled ? "bg-amber-500" : "bg-amber-900/50"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#120d0a] transition-transform duration-200 ${interferenceEnabled ? "translate-x-4" : "translate-x-0"}`}
+                  />
+                </button>
+              </div>
+
+              {interferenceEnabled && (
+                <div className="pl-3 border-l-2 border-amber-900/40 space-y-3 mt-2">
+                  {/* Type selector */}
+                  <div>
+                    <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35 mb-1">
+                      Interference type
+                    </div>
+                    <select
+                      value={interferenceType}
+                      onChange={(e) =>
+                        patchAP({ interferenceType: e.target.value })
+                      }
+                      className="w-full rounded-lg bg-[#1a1410] border border-amber-900/40 text-amber-100 text-xs px-3 py-2 outline-none focus:border-amber-500/50"
+                    >
+                      <option value="wn">White Noise (wn)</option>
+                      <option value="st">Shepherd Tone (st)</option>
+                    </select>
+                  </div>
+
+                  {/* Volume slider */}
+                  <div>
+                    <div className="flex justify-between text-[9px] uppercase tracking-[0.16em] text-amber-200/35 mb-1">
+                      <span>Interference volume</span>
+                      <span className="text-amber-200/60">
+                        {Math.round(interferenceVolume * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={interferenceVolume}
+                      onChange={(e) =>
+                        patchAP({
+                          interferenceVolume: Number(e.target.value),
+                        })
+                      }
+                      className="w-full h-1.5 rounded-full accent-amber-500 bg-amber-900/50 appearance-none cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Duration */}
+                  <div>
+                    <div className="flex justify-between text-[9px] uppercase tracking-[0.16em] text-amber-200/35 mb-1">
+                      <span>Play duration</span>
+                      <span className="text-amber-200/60">
+                        {interferenceDuration.toFixed(1)}s
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="3"
+                      step="0.1"
+                      value={interferenceDuration}
+                      onChange={(e) =>
+                        patchAP({
+                          interferenceDuration: Number(e.target.value),
+                        })
+                      }
+                      className="w-full h-1.5 rounded-full accent-amber-500 bg-amber-900/50 appearance-none cursor-pointer"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Auto-advance toggle */}
             <div className="border-t border-amber-900/30 pt-3 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs text-amber-100">Auto-advance</div>
                   <div className="text-[10px] text-amber-200/35">
-                    Correct → instant next note · Wrong → shows error
+                    Correct → instant next note · Wrong → shows error, you tap
+                    to continue
                   </div>
                 </div>
                 <button
@@ -2363,13 +2767,15 @@ function AbsolutePitchTab({ audio }) {
                 </button>
               </div>
 
+              {/* Playback repeat — only visible when auto-advance is on */}
               {autoAdvance && (
                 <div className="pl-3 border-l-2 border-amber-900/40 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-xs text-amber-100">Play it back</div>
                       <div className="text-[10px] text-amber-200/35">
-                        Plays note · 1s · plays again · 1s · then you answer
+                        Plays note · 1s · plays again · 1s · then you answer.
+                        Gives you time to sing or play along before guessing.
                       </div>
                     </div>
                     <button
@@ -2389,6 +2795,7 @@ function AbsolutePitchTab({ audio }) {
               )}
             </div>
 
+            {/* Custom note selection */}
             <div className="border-t border-amber-900/30 pt-3 space-y-2">
               <div className="flex items-center justify-between">
                 <div>
@@ -2412,6 +2819,9 @@ function AbsolutePitchTab({ audio }) {
               </div>
               {customNotesEnabled && (
                 <div className="mt-1">
+                  <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/30 mb-2">
+                    Select notes to include
+                  </div>
                   <div className="grid grid-cols-6 gap-1">
                     {NOTE_NAMES.map((n) => (
                       <button
@@ -2427,13 +2837,29 @@ function AbsolutePitchTab({ audio }) {
                       </button>
                     ))}
                   </div>
+                  <div className="mt-1.5 text-[10px] text-amber-200/25">
+                    {customNotes.length} note
+                    {customNotes.length !== 1 ? "s" : ""} selected:{" "}
+                    {customNotes.map((n) => tx(n)).join(" · ")}
+                    {txOffset !== 0 && (
+                      <span className="text-amber-200/20">
+                        {" "}
+                        (shown in {transposition} pitch)
+                      </span>
+                    )}{" "}
+                    · stage progress paused while custom is active
+                  </div>
                 </div>
               )}
             </div>
 
+            {/* Octave selection */}
             <div className="border-t border-amber-900/30 pt-3 space-y-2">
               <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35">
                 Octaves
+              </div>
+              <div className="text-[10px] text-amber-200/25 -mt-1">
+                Multiple octaves defeat pitch-height shortcuts. Start with one.
               </div>
               <div className="flex gap-1.5">
                 {ALL_OCTAVES.map((oct) => (
@@ -2452,6 +2878,7 @@ function AbsolutePitchTab({ audio }) {
               </div>
             </div>
 
+            {/* Instrument */}
             <div className="border-t border-amber-900/30 pt-3 space-y-2">
               <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35">
                 Instrument
@@ -2461,12 +2888,56 @@ function AbsolutePitchTab({ audio }) {
                 updateAudio={updateAudio}
               />
             </div>
+
+            {/* Stage jump + reset */}
+            {!customNotesEnabled && (
+              <div className="border-t border-amber-900/30 pt-3 space-y-2">
+                <div className="text-[9px] uppercase tracking-[0.16em] text-amber-200/35">
+                  Progress
+                </div>
+                <button
+                  onClick={() => setJumpStage((j) => !j)}
+                  className="text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors"
+                >
+                  Jump to stage ↗
+                </button>
+                {jumpStage && (
+                  <div className="p-2 rounded-lg bg-[#120d0a] border border-amber-900/40">
+                    <div className="text-[10px] text-amber-200/40 mb-2">
+                      Stats reset for the new stage.
+                    </div>
+                    <div className="grid grid-cols-4 gap-1">
+                      {AP_STAGES.map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => handleJumpToStage(s.id)}
+                          className={`py-1.5 rounded-lg text-[10px] font-medium transition-all ${
+                            s.id === progress.stageId
+                              ? "bg-amber-500 text-[#1a1208]"
+                              : "border border-amber-900/40 text-amber-200/60 hover:bg-amber-900/20"
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <ConfirmButton
+                  label="Restart all AP training"
+                  confirmLabel="Yes, reset all progress"
+                  onConfirm={handleReset}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
 
+      {/* ── DISCRIMINATION MODE ── */}
       {apMode === "discrimination" && (
         <div className="rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-4 space-y-3">
+          {/* Stats row */}
           <div className="flex justify-between text-[10px] text-amber-200/35 px-1">
             <span>
               Session {discAccuracy !== null ? `${discAccuracy}%` : "—"} (
@@ -2488,14 +2959,36 @@ function AbsolutePitchTab({ audio }) {
             {closeDistractors
               ? "Focus note or close neighbour?"
               : "What note is this?"}
+            {txOffset !== 0 && (
+              <span className="ml-1 normal-case tracking-normal text-amber-500/40">
+                · {transposition} pitch
+              </span>
+            )}
           </div>
 
+          {/* Play / replay button — only in manual mode */}
           {!autoAdvance && (
             <div className="flex justify-center gap-3">
               <button
                 onClick={() => {
                   if (!discTrial) return;
-                  playNote(discTrial.midi, { duration: 1.2, gain: 0.24 });
+                  if (interferenceEnabled) {
+                    playInterference({
+                      type: interferenceType,
+                      duration: interferenceDuration,
+                      volume: interferenceVolume,
+                    });
+                    setTimeout(
+                      () =>
+                        playNote(discTrial.midi, {
+                          duration: 1.2,
+                          gain: 0.24,
+                        }),
+                      interferenceDuration * 1000 + 120,
+                    );
+                  } else {
+                    playNote(discTrial.midi, { duration: 1.2, gain: 0.24 });
+                  }
                 }}
                 className="py-3 px-8 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]"
               >
@@ -2504,6 +2997,7 @@ function AbsolutePitchTab({ audio }) {
             </div>
           )}
 
+          {/* Auto-advance start/stop */}
           {autoAdvance && !discRunning && !discAnswered && (
             <button
               onClick={() => generateDiscTrial(true)}
@@ -2512,10 +3006,21 @@ function AbsolutePitchTab({ audio }) {
               ▸ Start
             </button>
           )}
+          {autoAdvance && discRunning && !discAnswered && (
+            <div className="flex justify-end">
+              <button
+                onClick={stopDiscLoop}
+                className="px-3 py-1.5 rounded-lg border border-amber-900/40 text-amber-200/40 text-xs hover:bg-amber-900/20"
+              >
+                ■ Stop
+              </button>
+            </div>
+          )}
 
+          {/* Answer buttons: one per focus note + Other */}
           {(!autoAdvance || (autoAdvance && discRunning) || discAnswered) && (
             <div
-              className="grid gap-2"
+              className={`grid gap-2 ${discFocusNotes.length <= 3 ? "grid-cols-" + Math.min(discFocusNotes.length + 1, 4) : "grid-cols-4"}`}
               style={{
                 gridTemplateColumns: `repeat(${Math.min(discFocusNotes.length + 1, 4)},1fr)`,
               }}
@@ -2535,17 +3040,20 @@ function AbsolutePitchTab({ audio }) {
                     className={`py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
                       isCorrectAnswer && discLastCorrect
                         ? "bg-green-600 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]"
-                        : wasMyGuess && !discLastCorrect
-                          ? "bg-red-900/50 text-red-300 border border-red-800/40"
-                          : discAnswered
-                            ? "bg-[#1a1410] border border-amber-900/20 text-amber-200/25"
-                            : "bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:border-amber-500/50 hover:bg-amber-900/20"
+                        : isCorrectAnswer && !discLastCorrect
+                          ? "bg-green-600 text-white"
+                          : wasMyGuess && !discLastCorrect
+                            ? "bg-red-900/50 text-red-300 border border-red-800/40"
+                            : discAnswered
+                              ? "bg-[#1a1410] border border-amber-900/20 text-amber-200/25"
+                              : "bg-[#1a1410] border border-amber-900/40 text-amber-100 hover:border-amber-500/50 hover:bg-amber-900/20"
                     }`}
                   >
                     {tx(n)}
                   </button>
                 );
               })}
+              {/* Other button */}
               {(() => {
                 const isOtherCorrect =
                   discAnswered &&
@@ -2562,11 +3070,13 @@ function AbsolutePitchTab({ audio }) {
                     className={`py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
                       isOtherCorrect && discLastCorrect
                         ? "bg-green-600 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]"
-                        : wasOtherMyGuess && !discLastCorrect
-                          ? "bg-red-900/50 text-red-300 border border-red-800/40"
-                          : discAnswered
-                            ? "bg-[#1a1410] border border-amber-900/20 text-amber-200/25"
-                            : "bg-[#1a1410] border border-amber-900/40 text-amber-200/60 hover:border-amber-500/50 hover:bg-amber-900/20 italic"
+                        : isOtherCorrect && !discLastCorrect
+                          ? "bg-green-600 text-white"
+                          : wasOtherMyGuess && !discLastCorrect
+                            ? "bg-red-900/50 text-red-300 border border-red-800/40"
+                            : discAnswered
+                              ? "bg-[#1a1410] border border-amber-900/20 text-amber-200/25"
+                              : "bg-[#1a1410] border border-amber-900/40 text-amber-200/60 hover:border-amber-500/50 hover:bg-amber-900/20 italic"
                     }`}
                   >
                     Other
@@ -2576,6 +3086,7 @@ function AbsolutePitchTab({ audio }) {
             </div>
           )}
 
+          {/* Post-answer feedback */}
           {discAnswered && (
             <div
               style={{ animation: "fadeIn 0.2s ease-out" }}
@@ -2592,6 +3103,15 @@ function AbsolutePitchTab({ audio }) {
                     <span className="text-green-400">
                       {tx(discTrial?.name)}
                     </span>
+                    {discUserGuess && (
+                      <span className="text-red-300/70">
+                        {" "}
+                        · you selected{" "}
+                        {discUserGuess === "other"
+                          ? "Other"
+                          : tx(discUserGuess)}
+                      </span>
+                    )}
                   </div>
                   <button
                     onClick={() => generateDiscTrial(autoAdvance)}
@@ -2601,13 +3121,23 @@ function AbsolutePitchTab({ audio }) {
                   </button>
                 </>
               )}
+              {!autoAdvance && discLastCorrect && (
+                <button
+                  onClick={() => generateDiscTrial(false)}
+                  className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all"
+                >
+                  Next →
+                </button>
+              )}
             </div>
           )}
         </div>
       )}
 
+      {/* ── CLASSIC / CUSTOM MODE ── */}
       {apMode === "classic" && (
         <>
+          {/* Stage banner — hidden in custom mode */}
           {!customNotesEnabled && (
             <div className="rounded-xl border border-amber-500/20 bg-amber-950/30 p-3">
               <div className="flex items-center justify-between mb-1">
@@ -2630,22 +3160,102 @@ function AbsolutePitchTab({ audio }) {
                   </div>
                 </div>
               </div>
+              <div className="flex gap-1 mt-2">
+                {AP_STAGES.map((s) => (
+                  <div
+                    key={s.id}
+                    className={`h-1 flex-1 rounded-full transition-colors ${
+                      s.id < progress.stageId
+                        ? "bg-amber-400"
+                        : s.id === progress.stageId
+                          ? "bg-amber-500/60"
+                          : "bg-amber-900/40"
+                    }`}
+                  />
+                ))}
+              </div>
+              <button
+                onClick={() => setShowNoteStats((p) => !p)}
+                className="mt-2 text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors"
+              >
+                {showNoteStats ? "Hide per-note stats ▴" : "Per-note stats ▾"}
+              </button>
+              {showNoteStats && (
+                <div className="mt-2 grid grid-cols-6 gap-1">
+                  {NOTE_NAMES.map((n) => {
+                    const s = progress.noteStats[n];
+                    const pct =
+                      s?.total > 0
+                        ? Math.round((s.correct / s.total) * 100)
+                        : null;
+                    const isActive = activeNotes.includes(n);
+                    return (
+                      <div
+                        key={n}
+                        className={`rounded p-1 text-center ${isActive ? "bg-amber-950/60 border border-amber-800/30" : "opacity-30"}`}
+                      >
+                        <div className="text-[9px] font-semibold text-amber-200">
+                          {tx(n)}
+                        </div>
+                        <div className="text-[8px] text-amber-200/50">
+                          {pct !== null ? `${pct}%` : "—"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
+          {/* Custom mode banner */}
+          {customNotesEnabled && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 px-3 py-2 flex items-center gap-2">
+              <span className="text-amber-400 text-sm">✦</span>
+              <div>
+                <div className="text-xs font-semibold text-amber-300">
+                  Custom note pool active
+                </div>
+                <div className="text-[10px] text-amber-200/40">
+                  {customNotes.map((n) => tx(n)).join(" · ")} · stage progress
+                  paused
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Round card */}
           <div className="rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-4 text-center">
             <div className="text-[9px] uppercase tracking-[0.25em] text-amber-400/45 mb-1">
               {playbackRepeat && autoAdvance
                 ? "Play it back — listen & match on your instrument"
-                : "What note is this?"}
+                : autoAdvance
+                  ? "Auto-advance — what note is this?"
+                  : "What note is this?"}
+              {enabledOctaves.length > 1 && (
+                <span className="ml-1 text-amber-200/25 normal-case tracking-normal">
+                  {" "}
+                  (multi-octave)
+                </span>
+              )}
+              {txOffset !== 0 && (
+                <span className="ml-1 text-amber-500/40 normal-case tracking-normal">
+                  {" "}
+                  · {transposition} pitch
+                </span>
+              )}
             </div>
 
+            {/* ── PLAY-IT-BACK MODE: no answer buttons, just current note display + stop ── */}
             {autoAdvance && playbackRepeat ? (
               <div className="space-y-4 py-2">
                 {autoRunning ? (
                   <>
                     <div className="text-4xl font-semibold text-amber-300 tracking-wide">
                       {currentNote ? tx(currentNote.name) : "—"}
+                    </div>
+                    <div className="text-[10px] text-amber-200/35 leading-relaxed">
+                      Plays note → 1s gap → plays again → 1s gap → next note
                     </div>
                     <button
                       onClick={stopAutoLoop}
@@ -2665,23 +3275,71 @@ function AbsolutePitchTab({ audio }) {
               </div>
             ) : (
               <>
+                {/* Manual play button — hidden in auto-advance */}
                 {!autoAdvance && (
                   <div className="flex justify-center gap-3 mb-4">
                     <button
-                      onClick={() =>
-                        currentNote &&
-                        playNote(currentNote.midi, {
-                          duration: 1.8,
-                          gain: 0.24,
-                        })
-                      }
+                      onClick={() => {
+                        if (!currentNote) return;
+                        if (interferenceEnabled) {
+                          playInterference({
+                            type: interferenceType,
+                            duration: interferenceDuration,
+                            volume: interferenceVolume,
+                          });
+                          setTimeout(
+                            () =>
+                              playNote(currentNote.midi, {
+                                duration: 1.8,
+                                gain: 0.24,
+                              }),
+                            interferenceDuration * 1000 + 120,
+                          );
+                        } else {
+                          playNote(currentNote.midi, {
+                            duration: 1.8,
+                            gain: 0.24,
+                          });
+                        }
+                      }}
                       className="py-3 px-6 rounded-xl bg-amber-500 text-[#1a1208] font-semibold text-sm hover:bg-amber-400 active:scale-[0.98] transition-all shadow-[0_3px_10px_rgba(245,158,11,0.25)]"
                     >
                       ▸ Play note
                     </button>
+                    {answered && (
+                      <button
+                        onClick={() => {
+                          if (!currentNote) return;
+                          if (interferenceEnabled) {
+                            playInterference({
+                              type: interferenceType,
+                              duration: interferenceDuration,
+                              volume: interferenceVolume,
+                            });
+                            setTimeout(
+                              () =>
+                                playNote(currentNote.midi, {
+                                  duration: 1.8,
+                                  gain: 0.24,
+                                }),
+                              interferenceDuration * 1000 + 120,
+                            );
+                          } else {
+                            playNote(currentNote.midi, {
+                              duration: 1.8,
+                              gain: 0.24,
+                            });
+                          }
+                        }}
+                        className="px-4 py-3 rounded-xl border border-amber-500/40 text-amber-300 text-sm hover:bg-amber-500/10"
+                      >
+                        ↺
+                      </button>
+                    )}
                   </div>
                 )}
 
+                {/* Auto-advance start button when loop not yet running */}
                 {autoAdvance && !playbackRepeat && !autoRunning && (
                   <div className="mb-4">
                     <button
@@ -2693,6 +3351,31 @@ function AbsolutePitchTab({ audio }) {
                   </div>
                 )}
 
+                {/* Stop button for auto-advance while running */}
+                {autoAdvance && !playbackRepeat && autoRunning && !answered && (
+                  <div className="mb-4 flex justify-end">
+                    <button
+                      onClick={stopAutoLoop}
+                      className="px-3 py-1.5 rounded-lg border border-amber-900/40 text-amber-200/40 text-xs hover:bg-amber-900/20 transition-all"
+                    >
+                      ■ Stop
+                    </button>
+                  </div>
+                )}
+
+                {/* Hint text above buttons */}
+                {answered && !autoAdvance && (
+                  <div className="text-[9px] uppercase tracking-[0.18em] text-amber-200/30 mb-2">
+                    Tap any note to hear it
+                  </div>
+                )}
+                {answered && autoAdvance && !lastCorrect && (
+                  <div className="text-[10px] text-amber-200/40 mb-2">
+                    Tap the green note to hear it
+                  </div>
+                )}
+
+                {/* Answer button grid */}
                 <div className="grid grid-cols-4 gap-2 mb-3">
                   {answerNotes.map((n) => {
                     const midi =
@@ -2700,12 +3383,54 @@ function AbsolutePitchTab({ audio }) {
                       (currentNote?.octave ?? 4 + 1) * 12;
                     const isCorrect = answered && n === currentNote?.name;
                     const isWrong = answered && n !== currentNote?.name;
+
+                    // Button behaviour:
+                    // - Not yet answered: tap to submit guess (never plays sound)
+                    // - Answered, manual mode: tap to hear that note
+                    // - Answered, auto-advance, correct button: tap to hear correct note
+                    // - Answered, auto-advance, wrong buttons: disabled, no sound
                     const onClick = answered
                       ? autoAdvance
                         ? isCorrect
-                          ? () => playNote(midi, { duration: 1.5, gain: 0.22 })
+                          ? () => {
+                              if (interferenceEnabled) {
+                                playInterference({
+                                  type: interferenceType,
+                                  duration: interferenceDuration,
+                                  volume: interferenceVolume,
+                                });
+                                setTimeout(
+                                  () =>
+                                    playNote(midi, {
+                                      duration: 1.5,
+                                      gain: 0.22,
+                                    }),
+                                  interferenceDuration * 1000 + 120,
+                                );
+                              } else {
+                                playNote(midi, { duration: 1.5, gain: 0.22 });
+                              }
+                            }
                           : undefined
-                        : () => playNote(midi, { duration: 1.5, gain: 0.22 })
+                        : () => {
+                            if (interferenceEnabled) {
+                              playInterference({
+                                type: interferenceType,
+                                duration: interferenceDuration,
+                                volume: interferenceVolume,
+                              });
+                              setTimeout(
+                                () =>
+                                  playNote(midi, {
+                                    duration: 1.5,
+                                    gain: 0.22,
+                                  }),
+                                interferenceDuration * 1000 + 120,
+                              );
+                            } else {
+                              playNote(midi, { duration: 1.5, gain: 0.22 });
+                            }
+                          }
                       : () => handleGuess(n);
 
                     const disabled = answered && autoAdvance && isWrong;
@@ -2729,6 +3454,7 @@ function AbsolutePitchTab({ audio }) {
                   })}
                 </div>
 
+                {/* Wrong answer in auto-advance */}
                 {answered && autoAdvance && !lastCorrect && (
                   <div
                     style={{ animation: "fadeIn 0.2s ease-out" }}
@@ -2739,6 +3465,13 @@ function AbsolutePitchTab({ audio }) {
                       <span className="text-green-400">
                         {tx(currentNote?.name)}
                       </span>
+                      {userGuess && userGuess !== currentNote?.name && (
+                        <>
+                          {" "}
+                          · you selected{" "}
+                          <span className="text-red-300">{tx(userGuess)}</span>
+                        </>
+                      )}
                     </div>
                     <button
                       onClick={generateAndPlay}
@@ -2749,6 +3482,7 @@ function AbsolutePitchTab({ audio }) {
                   </div>
                 )}
 
+                {/* Manual mode post-answer */}
                 {answered && !autoAdvance && (
                   <div style={{ animation: "fadeIn 0.25s ease-out" }}>
                     <div
@@ -2757,7 +3491,23 @@ function AbsolutePitchTab({ audio }) {
                       {lastCorrect
                         ? "✓ Correct!"
                         : "✗ That was " + tx(currentNote?.name)}
+                      {!lastCorrect && (
+                        <span className="text-[10px] text-amber-200/40 block mt-0.5">
+                          Note plays again — listen carefully
+                        </span>
+                      )}
                     </div>
+                    {!customNotesEnabled &&
+                      classicAccuracy !== null &&
+                      progress.sessionTotal >= 5 && (
+                        <div className="text-[10px] text-amber-200/40 mb-2">
+                          {classicAccuracy}% over {progress.sessionTotal} trials
+                          {classicAccuracy >= 90 &&
+                            progress.sessionTotal >= 20 &&
+                            progress.stageId < AP_STAGES.length &&
+                            " · 🎉 Stage unlocking soon!"}
+                        </div>
+                      )}
                     <button
                       onClick={generateNote}
                       className="w-full py-2.5 rounded-xl bg-amber-600/90 text-[#1a1208] font-medium text-xs hover:bg-amber-500 active:scale-[0.98] transition-all"
@@ -2768,6 +3518,12 @@ function AbsolutePitchTab({ audio }) {
                 )}
               </>
             )}
+          </div>
+
+          <div className="text-[10px] text-amber-200/25 text-center leading-relaxed px-2">
+            {customNotesEnabled
+              ? "Custom mode: open AP settings to change your note pool or return to stage training."
+              : "Stages unlock at ≥90% over 20 trials. Open AP settings to jump, change octaves, or build a custom note pool."}
           </div>
         </>
       )}
@@ -2897,7 +3653,11 @@ function IntervalsTab({ audio }) {
     setProgress({ ...INT_DEFAULT_PROGRESS });
     generateRound();
   };
-
+  const handleUnlock = (id) =>
+    setProgress((prev) => ({
+      ...prev,
+      unlockedIntervals: [...new Set([...prev.unlockedIntervals, id])],
+    }));
   const accuracy =
     progress.sessionTotal > 0
       ? Math.round((progress.sessionCorrect / progress.sessionTotal) * 100)
@@ -2955,7 +3715,60 @@ function IntervalsTab({ audio }) {
             className="ml-auto"
           />
         </div>
+        {showProgress && (
+          <div className="space-y-1 mt-1">
+            {INTERVALS.map((iv) => {
+              const s = progress.intervalStats[iv.id];
+              const asc = s?.asc,
+                desc = s?.desc;
+              const unlocked = progress.unlockedIntervals.includes(iv.id);
+              return (
+                <div
+                  key={iv.id}
+                  className={`flex items-center gap-2 py-1 px-2 rounded-lg ${unlocked ? "bg-amber-950/40" : "opacity-40"}`}
+                >
+                  <span className="text-[10px] font-semibold text-amber-300 w-7">
+                    {iv.short}
+                  </span>
+                  <span className="text-[10px] text-amber-200/50 flex-1">
+                    {iv.label}
+                  </span>
+                  <span className="text-[9px] text-amber-200/35">
+                    ↑
+                    {asc
+                      ? `${Math.round((asc.c / Math.max(asc.t, 1)) * 100)}%`
+                      : "—"}{" "}
+                    ↓
+                    {desc
+                      ? `${Math.round((desc.c / Math.max(desc.t, 1)) * 100)}%`
+                      : "—"}
+                  </span>
+                  {!unlocked && (
+                    <button
+                      onClick={() => handleUnlock(iv.id)}
+                      className="text-[9px] text-amber-500/60 hover:text-amber-400 transition-colors"
+                    >
+                      unlock
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
+
+      {accuracy !== null && (
+        <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-[#1a1410] border border-amber-900/30">
+          <span className="text-[10px] text-amber-200/40">Session</span>
+          <span className="text-sm font-semibold text-amber-300">
+            {accuracy}%{" "}
+            <span className="text-[10px] text-amber-200/30 font-normal">
+              ({progress.sessionCorrect}/{progress.sessionTotal})
+            </span>
+          </span>
+        </div>
+      )}
 
       {round && (
         <div className="rounded-2xl border border-amber-900/30 bg-gradient-to-b from-[#1c140f] to-[#160f0b] p-4 text-center">
@@ -2969,6 +3782,14 @@ function IntervalsTab({ audio }) {
             >
               ▸ Play interval
             </button>
+            {answered && (
+              <button
+                onClick={() => playRound(round)}
+                className="px-4 py-3 rounded-xl border border-amber-500/40 text-amber-300 text-sm hover:bg-amber-500/10"
+              >
+                ↺
+              </button>
+            )}
           </div>
           <div className="grid grid-cols-3 gap-2 mb-3">
             {activeIntervals.map((iv) => {
@@ -3017,6 +3838,10 @@ function IntervalsTab({ audio }) {
           )}
         </div>
       )}
+      <div className="text-[10px] text-amber-200/25 text-center leading-relaxed px-2">
+        Ascending and descending are distinct skills. New intervals unlock at
+        ≥80% over 15 trials.
+      </div>
     </div>
   );
 }
@@ -3052,6 +3877,7 @@ export default function App() {
       }}
     >
       <div className="w-full max-w-sm">
+        {/* ── HEADER ROW: tab bar + theme toggle ── */}
         <div
           style={{
             display: "flex",
@@ -3060,6 +3886,7 @@ export default function App() {
             marginBottom: 12,
           }}
         >
+          {/* Tab bar */}
           <div
             style={{
               flex: 1,
@@ -3101,6 +3928,7 @@ export default function App() {
             ))}
           </div>
 
+          {/* Theme toggle button */}
           <button
             onClick={toggleTheme}
             title={`Switch to ${theme === "light" ? "dark" : "light"} theme`}
@@ -3119,6 +3947,10 @@ export default function App() {
               justifyContent: "center",
               transition: "transform 0.15s",
             }}
+            onMouseDown={(e) =>
+              (e.currentTarget.style.transform = "translate(1px,1px)")
+            }
+            onMouseUp={(e) => (e.currentTarget.style.transform = "")}
           >
             {theme === "light" ? "🌙" : "☀️"}
           </button>
@@ -3131,23 +3963,152 @@ export default function App() {
 
       <style>{`
         @keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+
+        /* ── Base resets ── */
         * { box-sizing: border-box; }
         button { font-family: inherit; }
         select { font-family: inherit; }
         option { background: var(--white); color: var(--ink); }
+
+        /* ── Remap every Tailwind dark/amber class to the new palette ── */
+
+        /* Page & card backgrounds */
+        .bg-\\[\\#120d0a\\],.bg-\\[\\#1a1410\\],.bg-\\[\\#160f0b\\],.bg-\\[\\#1c140f\\]
+          { background: var(--surface) !important; }
+        .from-\\[\\#1c140f\\] { --tw-gradient-from: var(--card-bg) !important; }
+        .to-\\[\\#160f0b\\]   { --tw-gradient-to:   var(--card-bg) !important; }
+        .bg-gradient-to-b    { background: var(--card-bg) !important; }
+
+        /* All rounded card panels */
         .rounded-2xl,.rounded-xl {
           background: var(--card-bg);
           border: 2px solid var(--ink) !important;
           box-shadow: var(--shadow-card) !important;
         }
-        .bg-amber-500 { background: var(--lime-electric) !important; color: var(--ink) !important; border: 2px solid var(--ink) !important; box-shadow: var(--shadow-btn) !important; }
-        .bg-amber-400 { background: var(--cta-hover) !important; }
-        .bg-amber-600\\/90,.bg-amber-600 { background: var(--pink-hot) !important; color: var(--ink) !important; border: 2px solid var(--ink) !important; box-shadow: var(--shadow-btn) !important; }
-        .bg-green-600 { background: var(--lime-electric) !important; color: var(--ink) !important; border-color: var(--ink) !important; }
-        .bg-red-900\\/40,.bg-red-900\\/50 { background: var(--pink-hot) !important; }
+        /* Focus panel (practice focus / stage banner) uses blue-baby */
+        .border-amber-500\\/20 {
+          background: var(--card-alt-bg) !important;
+          border-color: var(--ink) !important;
+        }
+        /* Collapsible settings panels */
+        .overflow-hidden.rounded-xl {
+          background: var(--card-bg) !important;
+        }
+
+        /* Text */
+        .text-amber-50,.text-amber-100,
+        .text-amber-200\\/60,.text-amber-200\\/80
+                              { color: var(--text-primary)   !important; }
+        .text-amber-200\\/40,.text-amber-200\\/45,.text-amber-200\\/50
+                              { color: var(--text-secondary)  !important; }
+        .text-amber-200\\/25,.text-amber-200\\/30,.text-amber-200\\/35,.text-amber-200\\/20
+                              { color: var(--text-muted)      !important; }
+        .text-amber-300       { color: var(--text-primary)    !important; font-weight: 700; }
+        .text-amber-300\\/50,.text-amber-300\\/60
+                              { color: var(--text-secondary)  !important; }
+        .text-amber-400,.text-amber-400\\/45,.text-amber-400\\/50,
+        .text-amber-400\\/55,.text-amber-400\\/60
+                              { color: var(--text-secondary)  !important; font-weight:700; text-transform:uppercase; }
+        .text-amber-500\\/40,.text-amber-500\\/50,.text-amber-500\\/60,.text-amber-500\\/70
+                              { color: var(--text-muted)      !important; }
+        .text-green-400       { color: var(--ink)             !important; }
+        .text-red-400         { color: var(--ink)             !important; }
+        .text-red-300,.text-red-300\\/60
+                              { color: var(--ink)             !important; }
+        .text-\\[\\#1a1208\\] { color: var(--ink)             !important; }
+        .text-amber-100       { color: var(--text-primary)    !important; }
+
+        /* Borders */
+        .border-amber-900\\/30,.border-amber-900\\/40,.border-amber-900\\/20,
+        .border-amber-800\\/30,.border-amber-500\\/40
+                              { border-color: var(--ink) !important; }
+        .border-amber-700\\/60,.border-red-800\\/40,.border-red-900\\/30
+                              { border-color: var(--ink) !important; }
+        .border-red-900\\/30  { border-color: var(--ink) !important; }
+
+        /* Primary CTA buttons (amber-500) → lime */
+        .bg-amber-500         { background: var(--lime-electric) !important; color: var(--ink) !important;
+                                border: 2px solid var(--ink) !important; box-shadow: var(--shadow-btn) !important; }
+        .bg-amber-400         { background: var(--cta-hover) !important; }
+        .hover\\:bg-amber-400:hover { background: var(--cta-hover) !important; }
+        .hover\\:bg-amber-500:hover { background: var(--lime-electric) !important; color: var(--ink) !important; }
+
+        /* Secondary action buttons (amber-600) → pink-hot */
+        .bg-amber-600\\/90,.bg-amber-600
+                              { background: var(--pink-hot) !important; color: var(--ink) !important;
+                                border: 2px solid var(--ink) !important; box-shadow: var(--shadow-btn) !important; }
+        .hover\\:bg-amber-500:hover { background: var(--lime-electric) !important; }
+
+        /* Panel backgrounds */
+        .bg-amber-900\\/20,.bg-amber-900\\/40,.bg-amber-900\\/50,
+        .bg-amber-950\\/30,.bg-amber-950\\/40,.bg-\\[\\#1a1410\\]
+                              { background: var(--surface-raised) !important; }
+        .bg-amber-500\\/10    { background: rgba(244,169,213,0.15) !important; }
+
+        /* Correct state → lime */
+        .bg-green-600         { background: var(--lime-electric) !important;
+                                color: var(--ink) !important;
+                                border-color: var(--ink) !important; }
+        .bg-green-500,.hover\\:bg-green-500:hover
+                              { background: var(--lime-electric) !important; color: var(--ink) !important; }
+        .shadow-\\[0_0_12px_rgba\\(34\\,197\\,94\\,0\\.4\\)\\],
+        .shadow-\\[0_0_14px_rgba\\(178\\,244\\,123\\,0\\.4\\)\\],
+        .shadow-\\[0_0_10px_rgba\\(34\\,197\\,94\\,0\\.4\\)\\]
+                              { box-shadow: 0 0 0 3px var(--lime-electric), var(--shadow-btn) !important; }
+
+        /* Wrong state → pink */
+        .bg-red-900\\/40,.bg-red-900\\/30,.bg-red-900\\/50
+                              { background: var(--pink-hot) !important; }
+        .hover\\:bg-red-900\\/60:hover
+                              { background: var(--pink-hot) !important; }
+
+        /* Hover states */
+        .hover\\:bg-amber-900\\/20:hover
+                              { background: var(--surface-raised) !important; }
+        .hover\\:bg-amber-500\\/10:hover
+                              { background: rgba(163,225,244,0.3) !important; }
+        .hover\\:border-amber-500\\/50:hover
+                              { border-color: var(--ink) !important; }
+        .hover\\:text-amber-200\\/80:hover,.hover\\:text-amber-200\\/60:hover,
+        .hover\\:text-amber-300:hover,.hover\\:text-amber-400:hover
+                              { color: var(--grape) !important; }
+        .hover\\:text-amber-200\\/50:hover,.hover\\:text-amber-200\\/55:hover
+                              { color: var(--text-secondary) !important; }
+
+        /* Streak dots */
+        .bg-amber-400         { background: var(--streak-active)   !important; border-radius: 99px; }
+        .bg-amber-900\\/50    { background: var(--streak-inactive)  !important; border-radius: 99px; }
+
+        /* Stage progress dots */
+        .bg-amber-500\\/60    { background: var(--progress-current) !important; }
+        .bg-amber-900\\/40    { background: var(--progress-future)  !important;
+                                border: 1.5px solid var(--muted-light) !important; }
+
+        /* Collapsible toggle arrows & small text */
+        .text-amber-500\\/60  { color: var(--grape) !important; font-weight: 800; }
+
+        /* Dividers */
+        .divide-amber-900\\/30>*+* { border-color: var(--muted-light) !important; }
+        .border-t.border-amber-900\\/30,.border-b.border-amber-900\\/30
+                              { border-color: var(--muted-light) !important; }
+
+        /* Shadows */
+        .shadow-\\[0_3px_10px_rgba\\(245\\,158\\,11\\,0\\.25\\)\\],
+        .shadow-\\[0_4px_14px_rgba\\(245\\,158\\,11\\,0\\.25\\)\\],
+        .shadow-\\[0_4px_16px_rgba\\(250\\,242\\,112\\,0\\.3\\)\\]
+                              { box-shadow: var(--shadow-cta) !important; }
+        .shadow-\\[inset_0_1px_0_rgba\\(255\\,255\\,255\\,0\\.03\\)\\]
+                              { box-shadow: none !important; }
+
+        /* Active scale stays */
         .active\\:scale-\\[0\\.98\\]:active { transform: scale(0.98) translate(1px,1px); }
-        .active\\:scale-95:active { transform: scale(0.95) translate(1px,1px); }
+        .active\\:scale-95:active          { transform: scale(0.95) translate(1px,1px); }
+        .active\\:scale-90:active          { transform: scale(0.90); }
+
+        /* Gradient backgrounds → flat card */
+        .bg-gradient-to-b     { background: var(--card-bg) !important; }
       `}</style>
     </div>
   );
 }
+```
