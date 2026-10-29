@@ -1,4 +1,3 @@
-```jsx
 // @ts-nocheck
 import React, {
   useState,
@@ -4111,4 +4110,3 @@ export default function App() {
     </div>
   );
 }
-```
